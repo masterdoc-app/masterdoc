@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+# One deploy per branch at a time; do not cancel in-flight rsync/reload on new pushes.
+concurrency:
+  group: deploy-masterdoc-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEPLOY_HOST: 91.207.75.72
+  DEPLOY_REMOTE_PATH: /var/www/masterdoc
+
+jobs:
+  deploy:
+    name: Deploy static site
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify deploy secrets
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          USER_NAME: ${{ secrets.DEPLOY_USER }}
+        run: |
+          test -n "$KEY" || { echo "Add repository secret DEPLOY_SSH_PRIVATE_KEY (private SSH key)"; exit 1; }
+          test -n "$USER_NAME" || { echo "Add repository secret DEPLOY_USER (e.g. root)"; exit 1; }
+
+      - name: Load SSH key and known_hosts
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_ed25519
+          chmod 600 ~/.ssh/deploy_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Rsync landing → server
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i $HOME/.ssh/deploy_ed25519 -o IdentitiesOnly=yes" \
+            ./landing/ \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_REMOTE_PATH}/"
+
+      - name: Reload nginx
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_ed25519" -o IdentitiesOnly=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "nginx -t && systemctl reload nginx"
+
+      - name: Smoke (HTTP + Host)
+        run: |
+          curl -fsS -o /dev/null -w "%{http_code}\n" \
+            -H "Host: masterdoc.pro" \
+            "http://${DEPLOY_HOST}/"
