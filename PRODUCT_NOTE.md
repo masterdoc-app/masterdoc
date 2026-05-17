@@ -10,4 +10,4 @@
 
 ## Репозитории
 
-**Бэкенд:** https://github.com/AntonButov/masterdoc.git
+**Лендинг:** https://github.com/masterdoc-app/masterdoc
