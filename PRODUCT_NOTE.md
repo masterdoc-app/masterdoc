@@ -11,3 +11,7 @@
 ## Репозитории
 
 **Лендинг:** https://github.com/masterdoc-app/masterdoc
+
+## B2B-стратегия (2026-05-23)
+
+Основной GTM для службы эксплуатации сети: [STRATEGY.md](STRATEGY.md). B2C Atlant и Pairio-паттерн — отдельный трек; см. [B2B_MVP_SCOPE.md](B2B_MVP_SCOPE.md).
