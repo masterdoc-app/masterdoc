@@ -7,6 +7,7 @@
 | Документ | Назначение |
 |----------|------------|
 | [STRATEGY.md](STRATEGY.md) | ICP, one-liner, GTM, метрики |
+| [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) | **Проект ТОиР для малого бизнеса с AI-онбордингом: конкуренты, стейты, рабочие места** |
 | [DIGITIZATION_SEARCH_INTENT.md](DIGITIZATION_SEARCH_INTENT.md) | **Что ищут те, кто хочет оцифровать журналы и ИД** |
 | [SEO_KEYWORDS.md](SEO_KEYWORDS.md) | Матрица Wordstat для лендинга и рекламы |
 | [WORDSTAT_TOIR_AUTOMATION_LEADS.md](../masterdoc-toir/WORDSTAT_TOIR_AUTOMATION_LEADS.md) | **ТОиР: лиды на автоматизацию** (без 1С и журналов), свежий Wordstat |
