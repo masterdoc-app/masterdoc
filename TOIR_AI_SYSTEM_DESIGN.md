@@ -228,6 +228,71 @@ stateDiagram-v2
 
 Обязательные статусы: `draft` (только для AI-созданных), `new`, `assigned`, `in_progress`, `on_hold`, `done`, `closed`, `cancelled`.
 
+#### Жизнь заявки: от источника до журнала
+
+```mermaid
+flowchart TB
+  subgraph Sources["Источники заявки"]
+    CorrectiveEngineer["Инженер<br/>создаёт внеочередную заявку<br/>из карточки актива"]
+    CorrectiveRequester["Пользователь объекта<br/>(если включено userRequestsEnabled)<br/>текст + фото"]
+    PreventiveDoc["Документация актива<br/>паспорт / ИЭ / регламент"]
+    PreventiveCalendar["Активный регламент ТО<br/>nextDueAt"]
+  end
+
+  subgraph Agents["AI-агенты"]
+    Intake["Приёмщик<br/>структурирует дефект,<br/>проверяет дубли"]
+    Technologist["Технолог<br/>создаёт плановую заявку<br/>из документации"]
+    Scribe["Писарь<br/>оформляет закрытие<br/>и запись журнала"]
+  end
+
+  subgraph WorkOrder["WorkOrder"]
+    Draft["draft"]
+    New["new"]
+    Assigned["assigned"]
+    InProgress["in_progress"]
+    OnHold["on_hold"]
+    Done["done"]
+    Closed["closed"]
+    Cancelled["cancelled"]
+  end
+
+  subgraph Journal["Журнал эксплуатации"]
+    DraftJournal["draft JournalEntry"]
+    PostedJournal["posted JournalEntry"]
+  end
+
+  CorrectiveEngineer -->|текст + фото| Intake
+  CorrectiveRequester -->|только авторизован| Intake
+  Intake -->|draft corrective WorkOrder| Draft
+
+  PreventiveDoc -->|DocumentAttached| Technologist
+  Technologist -->|draft preventive WorkOrder<br/>+ checklist + MaintenancePlan| Draft
+  PreventiveCalendar -->|следующая дата ТО| New
+
+  Draft -->|подтверждает диспетчер / админ| New
+  Draft -->|отклоняет| Cancelled
+  New -->|назначает инженера| Assigned
+  Assigned -->|инженер взял в работу| InProgress
+  InProgress -->|нет доступа / нужно уточнение / ждём окно работ| OnHold
+  OnHold -->|можно продолжать| InProgress
+  InProgress -->|работы выполнены| Done
+  Done -->|возврат на доработку| InProgress
+  Done -->|принята или авто-приёмка через N дней| Closed
+  New -->|отмена| Cancelled
+  Assigned -->|отмена| Cancelled
+
+  InProgress -->|текстовый отчёт инженера| Scribe
+  Scribe -->|draft-закрытие + draft JournalEntry| Done
+  Done --> DraftJournal
+  DraftJournal -->|подтверждение| PostedJournal
+```
+
+Разница источников:
+
+- `corrective` / внеочередная заявка: создаётся инженером или авторизованным пользователем объекта (если включена фича), проходит через Приёмщика и попадает во `draft`.
+- `preventive` / плановая заявка: создаётся Технологом при добавлении документации к активу или календарём активного регламента; дальше живёт как обычная WorkOrder.
+- Закрытие всегда создаёт запись журнала: либо напрямую из закрытия, либо через черновик Писаря, который подтверждает человек.
+
 Решения для малого бизнеса:
 
 - **`draft` виден только как «входящие от ИИ»** — не засоряет доску диспетчера.
