@@ -516,12 +516,93 @@ sequenceDiagram
 | Слой | Решение |
 |------|---------|
 | Клиенты | KMP (Decompose, MVIKotlin) — Android для инженера, Web для диспетчера (как в B2B_MVP_SCOPE); авторизованный web/mobile/бот для пользователей объекта только при включённой фиче `userRequestsEnabled` |
+| **Auth** | **Zitadel Cloud** — внешний OIDC-провайдер; вход только по **email + пароль**, регистрация **только по invite** (§8.1) |
 | Backend | REST + PostgreSQL (обязательна, см. B2B_MVP_SCOPE); объектное хранилище для фото/PDF |
 | AI-слой | Мультиагентный (§4.2): общий рантайм агентов + декларативные определения (промпт, источники знаний, tools, модель — конфиг на агента); RAG-инфраструктура (Onyx-контур из B2C Atlant) как разделяемый сервис, но индексы скоупятся на агента |
 | Маршрутизация | Детерминированная: канал входа / экран / тип действия → конкретный агент; без агента-оркестратора |
 | AI-провайдеры | Абстракция над моделями на уровне рантайма: каждому агенту — свой tier (дешёвые на Приёмщика/Писаря, тяжёлые на Технолога); для РФ-рынка — вариант с YandexGPT/GigaChat для клиентов с требованиями к локализации данных |
 | Отчёты | SQL/ORM-запросы + предрасчитанные агрегаты + экспорт PDF/Excel; без LLM/AI-агента |
 | Качество | Per-agent eval-наборы и метрики (§4.2); логирование вызовов агентов для разбора ошибок извлечения |
+
+### 8.1 Авторизация (Zitadel Cloud)
+
+Аутентификация вынесена во **внешний облачный сервис** — не храним пароли в своём backend. Выбран **Zitadel Cloud** (managed OIDC): B2B-модель организаций из коробки, фиксированные роли, стандартный OIDC для KMP/Android и Web.
+
+#### Методы входа (первые релизы)
+
+| Метод | Статус |
+|-------|--------|
+| **Email + пароль** | ✅ единственный способ входа |
+| Регистрация по invite | ✅ admin приглашает пользователя на email |
+| Self-signup | ❌ отключён |
+| Magic link / email OTP | backlog |
+| Телефон (логин, SMS, MFA) | backlog |
+| Social login (Google, Microsoft) | backlog |
+| SSO / SAML для enterprise | backlog |
+
+#### Модель в Zitadel
+
+| Сущность Zitadel | Соответствие в TOiR |
+|------------------|---------------------|
+| Instance | Продукт Masterdoc (один tenant SaaS) |
+| Organization | Клиент — малая компания (1–50 объектов) |
+| User | Сотрудник клиента |
+| Project role | Фиксированная роль системы: `admin`, `dispatcher`, `engineer`, `requester`, `reporter` |
+| Invite | Admin приглашает пользователя по email → пользователь задаёт пароль |
+
+Кастомные роли в первых релизах **не создаём** — только пять фиксированных ролей из §7.1.
+
+Ограничение доступа к **объектам (Site)** хранится в нашем backend (таблица `user_site_access`), а не в Zitadel: JWT даёт `org_id` + `roles`, API дополнительно проверяет `site_ids` для конкретного запроса.
+
+#### Поток входа
+
+```mermaid
+sequenceDiagram
+  actor A as Admin
+  participant Z as Zitadel Cloud
+  actor U as Пользователь
+  participant C as KMP / Web
+  participant API as REST API
+
+  A->>Z: создаёт Organization (клиент)
+  A->>Z: invite user (email, role)
+  Z-->>U: письмо со ссылкой
+  U->>Z: задаёт пароль (first login)
+  U->>C: email + пароль
+  C->>Z: OIDC Authorization Code + PKCE
+  Z-->>C: access_token + refresh_token
+  C->>API: запрос с Bearer JWT
+  API->>API: валидация JWT (issuer, audience, signature)
+  API->>API: org_id + roles + site_ids
+  API-->>C: данные в рамках доступа
+```
+
+#### Интеграция по клиентам
+
+| Клиент | Протокол |
+|--------|----------|
+| Web (диспетчер, admin, reporter) | OIDC Authorization Code + PKCE |
+| Android (инженер) | OIDC Authorization Code + PKCE (AppAuth или аналог) |
+| REST API | Middleware: проверка JWT, извлечение `sub`, `org_id`, `roles`; пароли не храним |
+
+Backend **не реализует** `POST /auth/login` с собственной сессией — клиент получает токены напрямую от Zitadel, API только валидирует JWT. Refresh token — на стороне клиента по стандартному OIDC flow.
+
+#### Что admin делает в auth
+
+1. Создаёт организацию клиента (при подключении).
+2. Приглашает пользователей по email и назначает роль (`admin`, `dispatcher`, `engineer`, `requester`, `reporter`).
+3. В нашем приложении назначает доступ к объектам (`user_site_access`) — для ролей, которым это нужно.
+
+Роли в Zitadel и доступ к объектам в приложении — **два разных слоя**: роль определяет *что можно делать*, site access — *на каких объектах*.
+
+#### Почему Zitadel Cloud, а не альтернативы
+
+| Сервис | Вердикт для TOiR |
+|--------|------------------|
+| **Zitadel Cloud** | ✅ выбран: B2B org + роли, облако, OIDC, нейтрален к стеку (KMP + REST) |
+| Clerk | Хорош для React/Next.js, но сильнее привязан к фронтенд-экосистеме |
+| Auth0 | Избыточен и дороже для MVP с 1–20 пользователями на клиента |
+| Supabase / Firebase Auth | Org + RBAC пришлось бы строить в своём backend |
 
 Новые endpoint'ы поверх черновика API из B2B_MVP_SCOPE: `POST /assets/from-photo` (шильдик → draft), `POST /documents` (добавление документации к активу → событие для Технолога), `POST /documents/{id}/analyze-maintenance` (ручной перезапуск анализа), `GET/POST /maintenance-plans`, `POST /work-orders/text` (текст/фото → draft), `POST /work-orders/{id}/closeout/text`.
 
