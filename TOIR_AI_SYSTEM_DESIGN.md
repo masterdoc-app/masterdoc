@@ -517,7 +517,7 @@ sequenceDiagram
 |------|---------|
 | Клиенты | KMP (Decompose, MVIKotlin) — Android для инженера, Web для диспетчера (как в B2B_MVP_SCOPE); авторизованный web/mobile/бот для пользователей объекта только при включённой фиче `userRequestsEnabled` |
 | **Auth** | **Zitadel Cloud** — внешний OIDC-провайдер; вход только по **email + пароль**, регистрация **только по invite** (§8.1) |
-| Backend | REST + PostgreSQL (обязательна, см. B2B_MVP_SCOPE); объектное хранилище для фото/PDF |
+| Backend | **Микросервисы** (§8.2): 8 bounded-context сервисов + API Gateway; PostgreSQL per service; NATS для событий; MinIO для файлов |
 | AI-слой | Мультиагентный (§4.2): общий рантайм агентов + декларативные определения (промпт, источники знаний, tools, модель — конфиг на агента); RAG-инфраструктура (Onyx-контур из B2C Atlant) как разделяемый сервис, но индексы скоупятся на агента |
 | Маршрутизация | Детерминированная: канал входа / экран / тип действия → конкретный агент; без агента-оркестратора |
 | AI-провайдеры | Абстракция над моделями на уровне рантайма: каждому агенту — свой tier (дешёвые на Приёмщика/Писаря, тяжёлые на Технолога); для РФ-рынка — вариант с YandexGPT/GigaChat для клиентов с требованиями к локализации данных |
@@ -603,6 +603,210 @@ Backend **не реализует** `POST /auth/login` с собственной
 | Clerk | Хорош для React/Next.js, но сильнее привязан к фронтенд-экосистеме |
 | Auth0 | Избыточен и дороже для MVP с 1–20 пользователями на клиента |
 | Supabase / Firebase Auth | Org + RBAC пришлось бы строить в своём backend |
+
+### 8.2 Микросервисная архитектура backend
+
+Принцип: **разделяем по bounded context и скорости изменений**, а не «один микросервис = одна таблица». Для малого бизнеса (1–50 объектов, 1–20 инженеров) не нужно 20 сервисов — нужно 8 логических контуров, которые можно деплоить независимо и масштабировать точечно (AI, search, reports).
+
+#### Три варианта (и выбор)
+
+| Вариант | Состав | Плюсы | Минусы | Вердикт |
+|---------|--------|-------|--------|---------|
+| **A. Модульный монолит** | 1 deployable, модули внутри | Быстрый старт, простые транзакции | AI и отчёты тянут весь релиз; сложнее масштабировать RAG | Слишком тесная связка для AI-контура |
+| **B. Прагматичные микросервисы** | 8 сервисов + gateway | Независимый релиз AI/docs/reports; чёткие границы данных | Нужен брокер и контракты событий | ✅ **выбран** |
+| **C. Мелкие микросервисы** | 15+ (Site, Asset, WO, Journal…) | Максимальная изоляция | Overhead для команды и 1–20 юзеров на клиента | Overkill для MVP |
+
+#### Карта сервисов
+
+```mermaid
+flowchart TB
+  subgraph Clients["Клиенты"]
+    WEB["Web<br/>диспетчер / admin / reporter"]
+    AND["Android<br/>инженер"]
+  end
+
+  subgraph Edge["Edge"]
+    GW["API Gateway<br/>JWT, routing, rate limit"]
+  end
+
+  subgraph External["Внешние"]
+    ZIT["Zitadel Cloud"]
+    S3["Object Storage<br/>MinIO / S3"]
+  end
+
+  subgraph Core["Core domain"]
+    ACC["access-service<br/>org, site access, /me"]
+    CAT["catalog-service<br/>Site, Category, Asset"]
+    WRK["work-service<br/>WorkOrder, Journal, чек-лист"]
+    DOC["document-service<br/>метаданные файлов"]
+    MNT["maintenance-service<br/>Plan, Checklist, scheduler"]
+  end
+
+  subgraph Support["Support"]
+    RPT["report-service<br/>read models, export"]
+    NTF["notification-service<br/>push, email"]
+  end
+
+  subgraph AI["AI layer"]
+    AIG["ai-gateway<br/>маршрутизация агентов"]
+    SRCH["search-service<br/>Onyx / RAG"]
+  end
+
+  BUS[("NATS JetStream<br/>domain events")]
+
+  WEB --> GW
+  AND --> GW
+  GW --> ZIT
+  GW --> ACC & CAT & WRK & DOC & MNT & RPT & AIG
+
+  ACC --> BUS
+  CAT --> BUS
+  WRK --> BUS
+  DOC --> S3
+  DOC --> BUS
+  MNT --> BUS
+  MNT --> WRK
+  AIG --> SRCH
+  AIG --> CAT & WRK & DOC & ACC
+  BUS --> NTF & RPT & AIG & SRCH & MNT
+```
+
+#### Сервисы: владение данными и API
+
+| Сервис | Владеет (write model) | Публичные маршруты (через gateway) | Внутренние вызовы |
+|--------|----------------------|-------------------------------------|-------------------|
+| **access-service** | `org_settings`, `user_site_access`, `feature_flags` (`userRequestsEnabled`) | `GET /me`, `GET/PUT /org/settings`, `GET/PUT /users/{id}/sites` | Читает claims из JWT; кэш профиля |
+| **catalog-service** | `Site`, `EquipmentCategory`, `Asset` | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-photo` → draft | Отдаёт asset/site по id для work/ai |
+| **work-service** | `WorkOrder`, `JournalEntry`, выполнение чек-листа на заявке | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries`, `POST /work-orders/text`, `POST /work-orders/{id}/closeout/text` | Стейт-машина §6.1; публикует события статусов |
+| **document-service** | `Document` (метаданные), ссылки на blob | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` | Upload в S3; после commit → `document.attached` |
+| **maintenance-service** | `MaintenancePlan`, `Checklist` (шаблоны) | `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /maintenance/calendar` | Scheduler создаёт плановые WO через work-service; слушает `document.attached` |
+| **report-service** | read models, `report_templates`, `export_jobs` | `GET /reports/*`, `GET /export/journal`, `POST /reports/run` | Только read; строит проекции из событий |
+| **notification-service** | `notification_preferences`, `delivery_log` | `GET /notifications`, `PUT /notifications/preferences` | Слушает события; FCM/APNs, SMTP |
+| **ai-gateway** | `agent_run_log`, конфиг агентов | `POST /ai/passportist`, `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/technologist` | Детерминированная маршрутизация §4.2; tools → draft в catalog/work/maintenance |
+| **search-service** | индексы Onyx per asset/org | `GET /search/docs`, `POST /search/reindex` | Индексирует по `document.attached`; read-only для Наставника |
+
+**Auth (Zitadel)** и **blob storage (S3/MinIO)** — внешние; не наши микросервисы.
+
+#### Базы данных
+
+| Сервис | БД | Примечание |
+|--------|-----|------------|
+| access | `access_db` | Мало данных, частые чтения — Redis-кэш site access |
+| catalog | `catalog_db` | Asset + Category + Site |
+| work | `work_db` | WorkOrder + JournalEntry — ядро транзакций |
+| document | `document_db` | Метаданные; файлы в S3 |
+| maintenance | `maintenance_db` | Планы и шаблоны чек-листов |
+| report | `report_db` | Денормализованные проекции; можно отставать от write |
+| notification | `notification_db` | Очередь доставки, лог |
+| ai-gateway | `ai_db` | Логи вызовов, eval-метрики |
+| search | Onyx + `search_db` | Метаданные индексов |
+
+На MVP допустим **один PostgreSQL-кластер с отдельной schema per service** — границы логические, миграция на physical split без смены контрактов.
+
+#### События (NATS JetStream)
+
+Асинхронная связь вместо распределённых транзакций. Формат: CloudEvents, envelope с `orgId`, `actorId`, `correlationId`.
+
+| Событие | Publisher | Consumers | Зачем |
+|---------|-----------|-----------|-------|
+| `asset.draft.created` | catalog | notification | Админу: подтвердить карточку от Паспортиста |
+| `document.attached` | document | search, ai-gateway, maintenance | Индексация + Технолог (фаза 2) |
+| `work_order.draft.created` | work | notification | Диспетчеру: подтвердить draft от Приёмщика |
+| `work_order.status.changed` | work | notification, report | Push + обновление проекций |
+| `work_order.closed` | work | report | Агрегаты просрочек, повторов |
+| `journal.entry.created` | work | report | Журналы в выгрузках |
+| `maintenance.plan.approved` | maintenance | work | Создание/планирование preventive WO |
+| `maintenance.due.reached` | maintenance (scheduler) | work | Автосоздание плановой заявки |
+
+**Правило:** AI-агенты **не пишут напрямую** в чужие сервисы — только `createDraft*` через внутренний API work/catalog/maintenance (инвариант §4.1).
+
+#### Сквозные сценарии
+
+**Внеочередная заявка (фаза 1.1):**
+
+```mermaid
+sequenceDiagram
+  actor E as Инженер
+  participant GW as Gateway
+  participant AI as ai-gateway
+  participant WRK as work-service
+  participant CAT as catalog-service
+  participant BUS as NATS
+  participant NTF as notification-service
+
+  E->>GW: POST /ai/intake (текст + фото + assetId)
+  GW->>AI: маршрут → Приёмщик
+  AI->>CAT: findAsset, findDuplicates
+  AI->>ACC: checkFeatureFlag (если requester)
+  AI->>WRK: createDraftWorkOrder
+  WRK->>BUS: work_order.draft.created
+  BUS->>NTF: push диспетчеру
+  WRK-->>E: draft WorkOrder (ожидает подтверждения)
+```
+
+**Добавление документации → Технолог (фаза 2):**
+
+```mermaid
+sequenceDiagram
+  actor A as Admin
+  participant DOC as document-service
+  participant BUS as NATS
+  participant SRCH as search-service
+  participant AI as ai-gateway
+  participant MNT as maintenance-service
+  participant WRK as work-service
+
+  A->>DOC: POST /documents (PDF к активу)
+  DOC->>BUS: document.attached
+  BUS->>SRCH: индексация
+  BUS->>AI: Технолог
+  AI->>MNT: createDraftPlan + createDraftChecklist
+  AI->>WRK: createDraftWorkOrder (preventive)
+  MNT-->>A: пакет черновиков на подтверждение
+```
+
+#### API Gateway
+
+| Задача | Реализация |
+|--------|------------|
+| TLS termination | Traefik / nginx ingress |
+| JWT validation | JWKS от Zitadel; кэш ключей |
+| Routing | `/api/v1/sites` → catalog, `/api/v1/work-orders` → work, … |
+| Rate limiting | Per org_id; жёстче на `/ai/*` |
+| CORS | Только домены web-клиента |
+| Request context | Проброс `X-Org-Id`, `X-User-Id`, `X-Roles` в internal headers после валидации JWT |
+
+Клиенты ходят **только в gateway**. Service-to-service — internal network + mTLS или signed service JWT.
+
+#### Стек и деплой
+
+| Компонент | Выбор | Почему |
+|-----------|-------|--------|
+| Язык сервисов | **Kotlin + Ktor** (или Spring Boot) | Единый стек с KMP-командой; хорошая поддержка coroutines |
+| API | REST + OpenAPI 3 | Ktor client на KMP уже есть |
+| Брокер | **NATS JetStream** | Легче Kafka для нашего масштаба; persistence из коробки |
+| Object storage | MinIO (dev) / S3-compatible (prod) | Документы и фото |
+| Миграции | Flyway per service | Независимые schema |
+| Observability | OpenTelemetry + structured logs | `correlationId` сквозь gateway → ai → work |
+| Деплой MVP | Docker Compose (dev), Kubernetes (prod) | 8 сервисов + gateway + NATS + PG + MinIO |
+
+#### Фазы выката сервисов
+
+| Фаза | Деплои | Комментарий |
+|------|--------|-------------|
+| **MVP** | gateway, access, catalog, work, document, report (stub) | catalog+work — критический путь; report может читать work_db read-replica на старте |
+| **1.1** | + ai-gateway, search, notification | Приёмщик, Наставник, Писарь, push |
+| **2** | + maintenance | Технолог, календарь ТО, scheduler |
+| **3** | report → полноценные проекции | Конструктор отчётов для reporter |
+
+На MVP допустимо **физически объединить** `catalog + work` в один deployable (`core-service`), но **логически держать раздельными модулями** с разными schema и контрактами — чтобы split был без переписывания.
+
+#### Антипаттерны (чего не делаем)
+
+- **Распределённые 2PC-транзакции** — только saga через события; draft-пакет Технолога: partial failure → retry + dead letter
+- **Общая write-БД** на все сервисы — только read-replica для report
+- **Синхронные цепочки** gateway → ai → work → catalog → notification в одном HTTP-запросе — AI отвечает быстро с draft id, push уходит асинхронно
+- **Агент-оркестратор** — маршрутизация детерминирована (§4.2), не LLM-роутер
 
 Новые endpoint'ы поверх черновика API из B2B_MVP_SCOPE: `POST /assets/from-photo` (шильдик → draft), `POST /documents` (добавление документации к активу → событие для Технолога), `POST /documents/{id}/analyze-maintenance` (ручной перезапуск анализа), `GET/POST /maintenance-plans`, `POST /work-orders/text` (текст/фото → draft), `POST /work-orders/{id}/closeout/text`.
 

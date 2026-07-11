@@ -133,19 +133,35 @@ flowchart TB
 
 ## Backend MVP
 
-| Endpoint (черновик) | Назначение |
-|---------------------|------------|
-| `GET /me` | Профиль текущего пользователя (из JWT + site access) |
-| `GET/POST /sites` | Объекты |
-| `GET/POST /assets` | Оборудование |
-| `GET/POST /work-orders` | Заявки |
-| `GET/POST /journal-entries` | Журнал |
-| `POST /documents` | Upload |
-| `GET /documents/{id}` | Download |
-| `GET /export/journal` | Выгрузка |
-| `POST /chat/...` | Существующий Onyx (опционально привязка persona к asset) |
+Архитектура: **микросервисы** (см. [TOIR_AI_SYSTEM_DESIGN.md §8.2](TOIR_AI_SYSTEM_DESIGN.md#82-микросервисная-архитектура-backend)). Клиент ходит только в API Gateway; сервисы общаются через REST (sync) и NATS (async).
 
-**Хранение v1:** REST + серверная БД (PostgreSQL) — в [AGENTS.md](../masterdocapp/AGENTS.md) указано «без локальной БД в v1» для текущего клиента; для B2B серверная БД **обязательна**.
+### Сервисы фазы 1 (MVP)
+
+| Сервис | Endpoint'ы (через gateway) |
+|--------|---------------------------|
+| access-service | `GET /me`, `GET/PUT /org/settings`, `GET/PUT /users/{id}/sites` |
+| catalog-service | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-photo` |
+| work-service | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries` |
+| document-service | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` |
+| report-service | `GET /export/journal` (stub; read-replica work_db на старте) |
+
+### Сервисы фазы 1.1+
+
+| Сервис | Endpoint'ы |
+|--------|-------------|
+| ai-gateway | `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/passportist` |
+| search-service | `GET /search/docs` |
+| notification-service | push по событиям (без публичного API в MVP) |
+
+### Инфраструктура
+
+| Компонент | Назначение |
+|-----------|------------|
+| API Gateway | JWT (Zitadel), routing, rate limit |
+| PostgreSQL | schema per service (один кластер на MVP) |
+| NATS JetStream | domain events |
+| MinIO / S3 | PDF, фото |
+| Onyx | RAG-индексы (search-service) |
 
 ---
 
