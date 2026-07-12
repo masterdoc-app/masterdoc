@@ -153,6 +153,13 @@ flowchart TB
 | search-service | `GET /search/docs` |
 | notification-service | push по событиям (без публичного API в MVP) |
 
+### Сервисы фазы 2 (расширение work-service, без нового deployable)
+
+| Сервис | Endpoint'ы |
+|--------|-------------|
+| work-service | `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar?type=preventive`; `WorkOrder.type`: `corrective` \| `preventive` |
+| ai-gateway | `POST /ai/technologist` → draft-пакет в work-service |
+
 ### Инфраструктура
 
 | Компонент | Назначение |

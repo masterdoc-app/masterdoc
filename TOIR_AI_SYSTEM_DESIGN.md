@@ -517,7 +517,7 @@ sequenceDiagram
 |------|---------|
 | Клиенты | KMP (Decompose, MVIKotlin) — Android для инженера, Web для диспетчера (как в B2B_MVP_SCOPE); авторизованный web/mobile/бот для пользователей объекта только при включённой фиче `userRequestsEnabled` |
 | **Auth** | **Zitadel Cloud** — внешний OIDC-провайдер; вход только по **email + пароль**, регистрация **только по invite** (§8.1) |
-| Backend | **Микросервисы** (§8.2): 8 bounded-context сервисов + API Gateway; PostgreSQL per service; NATS для событий; MinIO для файлов |
+| Backend | **Микросервисы** (§8.2): 7 bounded-context сервисов + API Gateway; PostgreSQL per service; NATS для событий; MinIO для файлов |
 | AI-слой | Мультиагентный (§4.2): общий рантайм агентов + декларативные определения (промпт, источники знаний, tools, модель — конфиг на агента); RAG-инфраструктура (Onyx-контур из B2C Atlant) как разделяемый сервис, но индексы скоупятся на агента |
 | Маршрутизация | Детерминированная: канал входа / экран / тип действия → конкретный агент; без агента-оркестратора |
 | AI-провайдеры | Абстракция над моделями на уровне рантайма: каждому агенту — свой tier (дешёвые на Приёмщика/Писаря, тяжёлые на Технолога); для РФ-рынка — вариант с YandexGPT/GigaChat для клиентов с требованиями к локализации данных |
@@ -606,14 +606,16 @@ Backend **не реализует** `POST /auth/login` с собственной
 
 ### 8.2 Микросервисная архитектура backend
 
-Принцип: **разделяем по bounded context и скорости изменений**, а не «один микросервис = одна таблица». Для малого бизнеса (1–50 объектов, 1–20 инженеров) не нужно 20 сервисов — нужно 8 логических контуров, которые можно деплоить независимо и масштабировать точечно (AI, search, reports).
+Принцип: **разделяем по bounded context и скорости изменений**, а не «один микросервис = одна таблица». Для малого бизнеса (1–50 объектов, 1–20 инженеров) не нужно 20 сервисов — нужно **7 логических контуров**, которые можно деплоить независимо и масштабировать точечно (AI, search, reports).
+
+> **Решение по плановому ТО:** отдельный `maintenance-service` **не выделяем**. Регламенты, чек-листы и плановые заявки живут в **work-service** — это те же `WorkOrder`, но с типом `preventive` вместо `corrective`. Одна стейт-машина, один журнал, один календарь.
 
 #### Три варианта (и выбор)
 
 | Вариант | Состав | Плюсы | Минусы | Вердикт |
 |---------|--------|-------|--------|---------|
 | **A. Модульный монолит** | 1 deployable, модули внутри | Быстрый старт, простые транзакции | AI и отчёты тянут весь релиз; сложнее масштабировать RAG | Слишком тесная связка для AI-контура |
-| **B. Прагматичные микросервисы** | 8 сервисов + gateway | Независимый релиз AI/docs/reports; чёткие границы данных | Нужен брокер и контракты событий | ✅ **выбран** |
+| **B. Прагматичные микросервисы** | 7 сервисов + gateway | Независимый релиз AI/docs/reports; чёткие границы данных | Нужен брокер и контракты событий | ✅ **выбран** |
 | **C. Мелкие микросервисы** | 15+ (Site, Asset, WO, Journal…) | Максимальная изоляция | Overhead для команды и 1–20 юзеров на клиента | Overkill для MVP |
 
 #### Карта сервисов
@@ -637,9 +639,8 @@ flowchart TB
   subgraph Core["Core domain"]
     ACC["access-service<br/>org, site access, /me"]
     CAT["catalog-service<br/>Site, Category, Asset"]
-    WRK["work-service<br/>WorkOrder, Journal, чек-лист"]
+    WRK["work-service<br/>WorkOrder (corrective + preventive)<br/>Journal, Plan, Checklist, scheduler"]
     DOC["document-service<br/>метаданные файлов"]
-    MNT["maintenance-service<br/>Plan, Checklist, scheduler"]
   end
 
   subgraph Support["Support"]
@@ -657,18 +658,16 @@ flowchart TB
   WEB --> GW
   AND --> GW
   GW --> ZIT
-  GW --> ACC & CAT & WRK & DOC & MNT & RPT & AIG
+  GW --> ACC & CAT & WRK & DOC & RPT & AIG
 
   ACC --> BUS
   CAT --> BUS
   WRK --> BUS
   DOC --> S3
   DOC --> BUS
-  MNT --> BUS
-  MNT --> WRK
   AIG --> SRCH
   AIG --> CAT & WRK & DOC & ACC
-  BUS --> NTF & RPT & AIG & SRCH & MNT
+  BUS --> NTF & RPT & AIG & SRCH
 ```
 
 #### Подробно: за что отвечает каждый сервис
@@ -740,7 +739,7 @@ flowchart TB
 **Не делает:**
 - Не ведёт заявки и журнал (work-service)
 - Не хранит PDF-паспорта (document-service хранит файлы; catalog только знает `assetId`)
-- Не планирует ТО (maintenance-service)
+- Не планирует ТО (это work-service, тип `preventive`)
 
 **Пример:** админ создал объект «Кафе на Ленина», категорию «Кофемашина», актив «Saeco №1» → сгенерировался QR → инженер сканирует и видит карточку.
 
@@ -748,38 +747,50 @@ flowchart TB
 
 ---
 
-##### work-service — заявки и журнал (ядро ТОиР)
+##### work-service — заявки, журнал и плановое ТО (ядро ТОиР)
 
-**Задача:** весь **операционный цикл**: заявка появилась → назначили → инженер сделал → закрыли → запись в журнал. Это главный сервис системы.
+**Задача:** весь **операционный цикл** — от появления заявки до записи в журнал — плюс **плановое ТО**. Внеочередной ремонт и плановое обслуживание — это **одна сущность `WorkOrder`**, различаются полем `type`:
+
+| `WorkOrder.type` | Когда создаётся | Кто создаёт |
+|------------------|-----------------|-------------|
+| `corrective` | Поломка, дефект | engineer, requester (если фича), Приёмщик (draft) |
+| `preventive` | Регламент / календарь ТО | Технолог (draft), scheduler по `MaintenancePlan` |
 
 **Владеет данными:**
-- `WorkOrder` — заявка (внеочередная или плановая), статусы §6.1
+- `WorkOrder` — заявка любого типа, общая стейт-машина §6.1
 - `JournalEntry` — запись журнала (ТО, неисправность, устранение)
-- `WorkOrderChecklistItem` — выполнение пунктов чек-листа **на конкретной заявке** (галочки, фото)
+- `WorkOrderChecklistItem` — выполнение пунктов чек-листа **на конкретной заявке**
+- `MaintenancePlan` — регламент на актив: интервал, `nextDueAt` (фаза 2)
+- `Checklist` — шаблон работ, привязанный к плану или типу заявки (фаза 2)
+- **Scheduler** (внутри сервиса) — cron: `nextDueAt` наступил → создаёт `WorkOrder` типа `preventive`
 
 **Кто пользуется:**
 
 | Роль | Действие |
 |------|----------|
-| engineer | Создаёт внеочередную заявку с карточки актива |
-| engineer | Берёт в работу, отмечает чек-лист, закрывает |
-| dispatcher | Подтверждает draft, назначает исполнителя, меняет статус |
-| requester | Создаёт обращение (если фича включена) → draft |
-| ai-gateway (Приёмщик) | `createDraftWorkOrder` |
+| engineer | Создаёт внеочередную (`corrective`) заявку с карточки актива |
+| engineer | Берёт в работу, отмечает чек-лист, закрывает — **любой тип** |
+| dispatcher | Подтверждает draft, назначает, смотрит календарь ТО |
+| requester | Создаёт обращение (если фича) → draft `corrective` |
+| admin | Подтверждает пакет черновиков от Технолога (план + checklist + preventive WO) |
+| ai-gateway (Приёмщик) | `createDraftWorkOrder(type: corrective)` |
 | ai-gateway (Писарь) | `draftCloseout` + `draftJournalEntry` |
-| maintenance-service | Создаёт плановые заявки по расписанию |
+| ai-gateway (Технолог) | `createDraftPlan` + `createDraftChecklist` + `createDraftWorkOrder(type: preventive)` |
+| scheduler (внутренний) | `createWorkOrder(type: preventive)` по `MaintenancePlan.nextDueAt` |
 
 **Не делает:**
-- Не хранит шаблоны регламентов (maintenance-service)
-- Не хранит сами PDF документы
+- Не хранит PDF документы (document-service)
 - Не шлёт push (публикует событие → notification-service)
+- Не хранит справочник активов (catalog-service)
 
-**Пример дня инженера:**
-1. Сканирует QR витрины → `POST /work-orders` (внеочередная)
-2. Диспетчер назначает → статус `assigned`
-3. Инженер закрывает текстом → Писарь создаёт draft → подтверждение → `done` + запись в журнал
+**Примеры:**
 
-**События:** `work_order.draft.created`, `work_order.status.changed`, `work_order.closed`, `journal.entry.created`.
+1. **Внеочередная:** инженер сканирует QR → `corrective` → диспетчер назначает → закрытие → журнал.
+2. **Плановая (фаза 2):** админ загрузил ИЭ → Технолог создал draft-пакет → admin подтвердил → через 90 дней scheduler создаёт `preventive` → инженер выполняет как обычную заявку.
+
+**События:** `work_order.draft.created`, `work_order.status.changed`, `work_order.closed`, `journal.entry.created`, `maintenance_plan.approved` (внутреннее, тот же publisher — work).
+
+**API (фаза 2 добавляет к базовым):** `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar?type=preventive`.
 
 ---
 
@@ -801,39 +812,10 @@ flowchart TB
 
 **Не делает:**
 - Не парсит PDF и не отвечает на вопросы (search + ai-gateway)
-- Не создаёт регламенты (maintenance)
+- Не создаёт регламенты (work-service)
 - Не меняет карточку актива
 
-**Пример:** админ загрузил `passport_vitrina.pdf` к активу «Витрина №2» → файл в S3 → событие `document.attached` → search индексирует → Технолог (фаза 2) предлагает регламент.
-
----
-
-##### maintenance-service — плановое ТО и шаблоны работ
-
-**Задача:** **регламенты** — как часто обслуживать, **шаблоны чек-листов**, **календарь** и **автосоздание плановых заявок**. Появляется в фазе 2.
-
-**Владеет данными:**
-- `MaintenancePlan` — регламент на актив: интервал, nextDueAt, привязка к checklist
-- `Checklist` — **шаблон** работ (не выполнение на заявке — это work-service)
-- Scheduler — cron, который смотрит `nextDueAt` и создаёт плановые WO
-
-**Кто пользуется:**
-
-| Роль | Действие |
-|------|----------|
-| admin | Подтверждает draft-регламент от Технолога |
-| dispatcher | Смотрит календарь ТО на неделю |
-| ai-gateway (Технолог) | `createDraftPlan`, `createDraftChecklist` |
-| work-service | Принимает команду создать preventive WorkOrder |
-
-**Не делает:**
-- Не выполняет заявку (инженер в work-service)
-- Не хранит журнал устранений
-- Не индексирует документы
-
-**Пример:** к активу добавили ИЭ → Технолог предложил «ТО каждые 90 дней, 8 пунктов чек-листа» → админ подтвердил → через 90 дней scheduler создаёт плановую заявку в work-service.
-
-**События:** слушает `document.attached`; публикует `maintenance.plan.approved`, `maintenance.due.reached`.
+**Пример:** админ загрузил `passport_vitrina.pdf` к активу «Витрина №2» → файл в S3 → событие `document.attached` → search индексирует → Технолог (фаза 2) создаёт draft-пакет в work-service.
 
 ---
 
@@ -908,7 +890,7 @@ flowchart TB
 | Приёмщик | текст + фото дефекта | work: draft WorkOrder | catalog, work, access |
 | Наставник | вопрос инженера | **ничего** (read-only) | search, work (история) |
 | Писарь | текстовый отчёт | work: draft closeout + journal | work (текущая заявка) |
-| Технолог | событие document.attached | maintenance + work: draft plan, checklist, WO | document, catalog |
+| Технолог | событие document.attached | work: draft plan, checklist, preventive WO | document, catalog |
 
 **Не делает:**
 - Не подтверждает черновики (человек)
@@ -962,11 +944,11 @@ flowchart TB
 | «Что сломалось и кто чинит?» | work |
 | «Что мы делали с этим агрегатом год назад?» | work (journal) + report |
 | «Где инструкция?» | document (файл) + search (поиск) + ai (ответ) |
-| «Когда следующее ТО?» | maintenance (план) + work (заявка) |
+| «Когда следующее ТО?» | work (`MaintenancePlan` + `WorkOrder` type=preventive) |
 | «Сколько просрочек по сети?» | report |
 | «Кто может видеть магазин №3?» | access |
 | «Кто залогинен?» | Zitadel |
-| «ИИ предложил регламент — что дальше?» | ai → maintenance/work (draft) → admin подтверждает |
+| «ИИ предложил регламент — что дальше?» | ai → work (draft-пакет) → admin подтверждает |
 
 #### Сервисы: владение данными и API (краткая таблица)
 
@@ -974,12 +956,11 @@ flowchart TB
 |--------|----------------------|-------------------------------------|-------------------|
 | **access-service** | `org_settings`, `user_site_access`, `feature_flags` (`userRequestsEnabled`) | `GET /me`, `GET/PUT /org/settings`, `GET/PUT /users/{id}/sites` | Читает claims из JWT; кэш профиля |
 | **catalog-service** | `Site`, `EquipmentCategory`, `Asset` | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-photo` → draft | Отдаёт asset/site по id для work/ai |
-| **work-service** | `WorkOrder`, `JournalEntry`, выполнение чек-листа на заявке | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries`, `POST /work-orders/text`, `POST /work-orders/{id}/closeout/text` | Стейт-машина §6.1; публикует события статусов |
+| **work-service** | `WorkOrder` (type: `corrective` \| `preventive`), `JournalEntry`, `MaintenancePlan`, `Checklist`, чек-лист на заявке, scheduler | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries`, `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar`, `POST /work-orders/text`, `POST /work-orders/{id}/closeout/text` | Стейт-машина §6.1; scheduler создаёт preventive WO внутри сервиса |
 | **document-service** | `Document` (метаданные), ссылки на blob | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` | Upload в S3; после commit → `document.attached` |
-| **maintenance-service** | `MaintenancePlan`, `Checklist` (шаблоны) | `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /maintenance/calendar` | Scheduler создаёт плановые WO через work-service; слушает `document.attached` |
 | **report-service** | read models, `report_templates`, `export_jobs` | `GET /reports/*`, `GET /export/journal`, `POST /reports/run` | Только read; строит проекции из событий |
 | **notification-service** | `notification_preferences`, `delivery_log` | `GET /notifications`, `PUT /notifications/preferences` | Слушает события; FCM/APNs, SMTP |
-| **ai-gateway** | `agent_run_log`, конфиг агентов | `POST /ai/passportist`, `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/technologist` | Детерминированная маршрутизация §4.2; tools → draft в catalog/work/maintenance |
+| **ai-gateway** | `agent_run_log`, конфиг агентов | `POST /ai/passportist`, `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/technologist` | Детерминированная маршрутизация §4.2; tools → draft в catalog/work |
 | **search-service** | индексы Onyx per asset/org | `GET /search/docs`, `POST /search/reindex` | Индексирует по `document.attached`; read-only для Наставника |
 
 **Auth (Zitadel)** и **blob storage (S3/MinIO)** — внешние; не наши микросервисы.
@@ -990,9 +971,8 @@ flowchart TB
 |--------|-----|------------|
 | access | `access_db` | Мало данных, частые чтения — Redis-кэш site access |
 | catalog | `catalog_db` | Asset + Category + Site |
-| work | `work_db` | WorkOrder + JournalEntry — ядро транзакций |
+| work | `work_db` | WorkOrder (corrective + preventive), JournalEntry, MaintenancePlan, Checklist, scheduler |
 | document | `document_db` | Метаданные; файлы в S3 |
-| maintenance | `maintenance_db` | Планы и шаблоны чек-листов |
 | report | `report_db` | Денормализованные проекции; можно отставать от write |
 | notification | `notification_db` | Очередь доставки, лог |
 | ai-gateway | `ai_db` | Логи вызовов, eval-метрики |
@@ -1007,15 +987,14 @@ flowchart TB
 | Событие | Publisher | Consumers | Зачем |
 |---------|-----------|-----------|-------|
 | `asset.draft.created` | catalog | notification | Админу: подтвердить карточку от Паспортиста |
-| `document.attached` | document | search, ai-gateway, maintenance | Индексация + Технолог (фаза 2) |
-| `work_order.draft.created` | work | notification | Диспетчеру: подтвердить draft от Приёмщика |
+| `document.attached` | document | search, ai-gateway | Индексация + Технолог (фаза 2) → draft в work |
+| `work_order.draft.created` | work | notification | Диспетчеру: подтвердить draft от Приёмщика или Технолога |
 | `work_order.status.changed` | work | notification, report | Push + обновление проекций |
 | `work_order.closed` | work | report | Агрегаты просрочек, повторов |
 | `journal.entry.created` | work | report | Журналы в выгрузках |
-| `maintenance.plan.approved` | maintenance | work | Создание/планирование preventive WO |
-| `maintenance.due.reached` | maintenance (scheduler) | work | Автосоздание плановой заявки |
+| `maintenance_plan.approved` | work | notification | Админу: регламент активирован, первая preventive WO создана |
 
-**Правило:** AI-агенты **не пишут напрямую** в чужие сервисы — только `createDraft*` через внутренний API work/catalog/maintenance (инвариант §4.1).
+**Правило:** AI-агенты **не пишут напрямую** в чужие сервисы — только `createDraft*` через внутренний API catalog/work (инвариант §4.1). Плановое ТО — те же `WorkOrder` с `type: preventive`, без отдельного сервиса.
 
 #### Сквозные сценарии
 
@@ -1050,16 +1029,15 @@ sequenceDiagram
   participant BUS as NATS
   participant SRCH as search-service
   participant AI as ai-gateway
-  participant MNT as maintenance-service
   participant WRK as work-service
 
   A->>DOC: POST /documents (PDF к активу)
   DOC->>BUS: document.attached
   BUS->>SRCH: индексация
   BUS->>AI: Технолог
-  AI->>MNT: createDraftPlan + createDraftChecklist
-  AI->>WRK: createDraftWorkOrder (preventive)
-  MNT-->>A: пакет черновиков на подтверждение
+  AI->>WRK: createDraftPlan + createDraftChecklist
+  AI->>WRK: createDraftWorkOrder (type: preventive)
+  WRK-->>A: пакет черновиков на подтверждение
 ```
 
 #### API Gateway
@@ -1085,7 +1063,7 @@ sequenceDiagram
 | Object storage | MinIO (dev) / S3-compatible (prod) | Документы и фото |
 | Миграции | Flyway per service | Независимые schema |
 | Observability | OpenTelemetry + structured logs | `correlationId` сквозь gateway → ai → work |
-| Деплой MVP | Docker Compose (dev), Kubernetes (prod) | 8 сервисов + gateway + NATS + PG + MinIO |
+| Деплой MVP | Docker Compose (dev), Kubernetes (prod) | 7 сервисов + gateway + NATS + PG + MinIO |
 
 #### Фазы выката сервисов
 
@@ -1093,7 +1071,7 @@ sequenceDiagram
 |------|--------|-------------|
 | **MVP** | gateway, access, catalog, work, document, report (stub) | catalog+work — критический путь; report может читать work_db read-replica на старте |
 | **1.1** | + ai-gateway, search, notification | Приёмщик, Наставник, Писарь, push |
-| **2** | + maintenance | Технолог, календарь ТО, scheduler |
+| **2** | work-service: + MaintenancePlan, Checklist, scheduler, календарь | Технолог (draft-пакет в work) |
 | **3** | report → полноценные проекции | Конструктор отчётов для reporter |
 
 На MVP допустимо **физически объединить** `catalog + work` в один deployable (`core-service`), но **логически держать раздельными модулями** с разными schema и контрактами — чтобы split был без переписывания.
