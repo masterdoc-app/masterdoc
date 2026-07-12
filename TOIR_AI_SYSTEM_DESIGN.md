@@ -608,7 +608,7 @@ Backend **не реализует** `POST /auth/login` с собственной
 
 Принцип: **разделяем по bounded context и скорости изменений**, а не «один микросервис = одна таблица». Для малого бизнеса (1–50 объектов, 1–20 инженеров) не нужно 20 сервисов — нужно **7 логических контуров**, которые можно деплоить независимо и масштабировать точечно (AI, search, reports).
 
-> **Решение по плановому ТО:** отдельный `maintenance-service` **не выделяем**. Регламенты, чек-листы и плановые заявки живут в **work-service** — это те же `WorkOrder`, но с типом `preventive` вместо `corrective`. Одна стейт-машина, один журнал, один календарь.
+> **Решение по плановому ТО:** отдельный `maintenance-service` **не выделяем**. Регламенты, чек-листы и плановые заявки живут в **dashboard-service** — это те же `WorkOrder`, но с типом `preventive` вместо `corrective`. Одна стейт-машина, один журнал, один календарь.
 
 #### Три варианта (и выбор)
 
@@ -639,7 +639,7 @@ flowchart TB
   subgraph Core["Core domain"]
     ACC["access-service<br/>org, site access, /me"]
     CAT["catalog-service<br/>Site, Category, Asset"]
-    WRK["work-service<br/>WorkOrder (corrective + preventive)<br/>Journal, Plan, Checklist, scheduler"]
+    DSH["dashboard-service<br/>WorkOrder (corrective + preventive)<br/>Journal, Plan, Checklist, scheduler"]
     DOC["document-service<br/>метаданные файлов"]
   end
 
@@ -658,15 +658,15 @@ flowchart TB
   WEB --> GW
   AND --> GW
   GW --> ZIT
-  GW --> ACC & CAT & WRK & DOC & RPT & AIG
+  GW --> ACC & CAT & DSH & DOC & RPT & AIG
 
   ACC --> BUS
   CAT --> BUS
-  WRK --> BUS
+  DSH --> BUS
   DOC --> S3
   DOC --> BUS
   AIG --> SRCH
-  AIG --> CAT & WRK & DOC & ACC
+  AIG --> CAT & DSH & DOC & ACC
   BUS --> NTF & RPT & AIG & SRCH
 ```
 
@@ -683,10 +683,10 @@ flowchart TB
 | Делает | Не делает |
 |--------|-----------|
 | Проверяет токен, режет по rate limit | Бизнес-логику заявок, активов, отчётов |
-| Маршрутизирует `/api/v1/work-orders` → work-service | Хранение данных |
+| Маршрутизирует `/api/v1/work-orders` → dashboard-service | Хранение данных |
 | Пробрасывает `orgId`, `userId`, `roles` во внутренние заголовки | Решает, на какие объекты у пользователя доступ — это access-service |
 
-**Пример:** инженер открывает список заявок → gateway проверяет JWT → пересылает в work-service с заголовком `X-Org-Id`.
+**Пример:** инженер открывает список заявок → gateway проверяет JWT → пересылает в dashboard-service с заголовком `X-Org-Id`.
 
 ---
 
@@ -737,9 +737,9 @@ flowchart TB
 | ai-gateway (Паспортист) | `createDraftAsset` по фото шильдика |
 
 **Не делает:**
-- Не ведёт заявки и журнал (work-service)
+- Не ведёт заявки и журнал (dashboard-service)
 - Не хранит PDF-паспорта (document-service хранит файлы; catalog только знает `assetId`)
-- Не планирует ТО (это work-service, тип `preventive`)
+- Не планирует ТО (это dashboard-service, тип `preventive`)
 
 **Пример:** админ создал объект «Кафе на Ленина», категорию «Кофемашина», актив «Saeco №1» → сгенерировался QR → инженер сканирует и видит карточку.
 
@@ -747,7 +747,7 @@ flowchart TB
 
 ---
 
-##### work-service — заявки, журнал и плановое ТО (ядро ТОиР)
+##### dashboard-service — заявки, журнал и плановое ТО (ядро ТОиР)
 
 **Задача:** весь **операционный цикл** — от появления заявки до записи в журнал — плюс **плановое ТО**. Внеочередной ремонт и плановое обслуживание — это **одна сущность `WorkOrder`**, различаются полем `type`:
 
@@ -788,7 +788,7 @@ flowchart TB
 1. **Внеочередная:** инженер сканирует QR → `corrective` → диспетчер назначает → закрытие → журнал.
 2. **Плановая (фаза 2):** админ загрузил ИЭ → Технолог создал draft-пакет → admin подтвердил → через 90 дней scheduler создаёт `preventive` → инженер выполняет как обычную заявку.
 
-**События:** `work_order.draft.created`, `work_order.status.changed`, `work_order.closed`, `journal.entry.created`, `maintenance_plan.approved` (внутреннее, тот же publisher — work).
+**События:** `work_order.draft.created`, `work_order.status.changed`, `work_order.closed`, `journal.entry.created`, `maintenance_plan.approved` (внутреннее, тот же publisher — dashboard).
 
 **API (фаза 2 добавляет к базовым):** `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar?type=preventive`.
 
@@ -812,10 +812,10 @@ flowchart TB
 
 **Не делает:**
 - Не парсит PDF и не отвечает на вопросы (search + ai-gateway)
-- Не создаёт регламенты (work-service)
+- Не создаёт регламенты (dashboard-service)
 - Не меняет карточку актива
 
-**Пример:** админ загрузил `passport_vitrina.pdf` к активу «Витрина №2» → файл в S3 → событие `document.attached` → search индексирует → Технолог (фаза 2) создаёт draft-пакет в work-service.
+**Пример:** админ загрузил `passport_vitrina.pdf` к активу «Витрина №2» → файл в S3 → событие `document.attached` → search индексирует → Технолог (фаза 2) создаёт draft-пакет в dashboard-service.
 
 ---
 
@@ -839,7 +839,7 @@ flowchart TB
 **Не делает:**
 - Не создаёт и не меняет заявки
 - Не вызывает LLM (отчёты = SQL, не AI)
-- На MVP может читать read-replica work_db напрямую; позже — только свои проекции из событий
+- На MVP может читать read-replica dashboard_db напрямую; позже — только свои проекции из событий
 
 **Пример:** reporter выбирает «все заявки по магазину №3 за март, статус done» → report-service отдаёт таблицу и файл Excel.
 
@@ -870,7 +870,7 @@ flowchart TB
 - Не хранит заявки
 - Не формирует отчёты
 
-**Пример:** инженер закрыл заявку → work публикует событие → notification шлёт push диспетчеру и requester.
+**Пример:** инженер закрыл заявку → dashboard публикует событие → notification шлёт push диспетчеру и requester.
 
 ---
 
@@ -887,10 +887,10 @@ flowchart TB
 | Агент | Вход | Куда пишет draft | Читает у |
 |-------|------|------------------|----------|
 | Паспортист | фото шильдика | catalog: draft Asset | catalog (категории) |
-| Приёмщик | текст + фото дефекта | work: draft WorkOrder | catalog, work, access |
-| Наставник | вопрос инженера | **ничего** (read-only) | search, work (история) |
-| Писарь | текстовый отчёт | work: draft closeout + journal | work (текущая заявка) |
-| Технолог | событие document.attached | work: draft plan, checklist, preventive WO | document, catalog |
+| Приёмщик | текст + фото дефекта | dashboard: draft WorkOrder | catalog, dashboard, access |
+| Наставник | вопрос инженера | **ничего** (read-only) | search, dashboard (история) |
+| Писарь | текстовый отчёт | dashboard: draft closeout + journal | dashboard (текущая заявка) |
+| Технолог | событие document.attached | dashboard: draft plan, checklist, preventive WO | document, catalog |
 
 **Не делает:**
 - Не подтверждает черновики (человек)
@@ -941,26 +941,26 @@ flowchart TB
 | Бизнес-задача | Кто ведёт |
 |---------------|-----------|
 | «Где стоит оборудование?» | catalog |
-| «Что сломалось и кто чинит?» | work |
-| «Что мы делали с этим агрегатом год назад?» | work (journal) + report |
+| «Что сломалось и кто чинит?» | dashboard |
+| «Что мы делали с этим агрегатом год назад?» | dashboard (journal) + report |
 | «Где инструкция?» | document (файл) + search (поиск) + ai (ответ) |
-| «Когда следующее ТО?» | work (`MaintenancePlan` + `WorkOrder` type=preventive) |
+| «Когда следующее ТО?» | dashboard (`MaintenancePlan` + `WorkOrder` type=preventive) |
 | «Сколько просрочек по сети?» | report |
 | «Кто может видеть магазин №3?» | access |
 | «Кто залогинен?» | Zitadel |
-| «ИИ предложил регламент — что дальше?» | ai → work (draft-пакет) → admin подтверждает |
+| «ИИ предложил регламент — что дальше?» | ai → dashboard (draft-пакет) → admin подтверждает |
 
 #### Сервисы: владение данными и API (краткая таблица)
 
 | Сервис | Владеет (write model) | Публичные маршруты (через gateway) | Внутренние вызовы |
 |--------|----------------------|-------------------------------------|-------------------|
 | **access-service** | `org_settings`, `user_site_access`, `feature_flags` (`userRequestsEnabled`) | `GET /me`, `GET/PUT /org/settings`, `GET/PUT /users/{id}/sites` | Читает claims из JWT; кэш профиля |
-| **catalog-service** | `Site`, `EquipmentCategory`, `Asset` | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-photo` → draft | Отдаёт asset/site по id для work/ai |
-| **work-service** | `WorkOrder` (type: `corrective` \| `preventive`), `JournalEntry`, `MaintenancePlan`, `Checklist`, чек-лист на заявке, scheduler | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries`, `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar`, `POST /work-orders/text`, `POST /work-orders/{id}/closeout/text` | Стейт-машина §6.1; scheduler создаёт preventive WO внутри сервиса |
+| **catalog-service** | `Site`, `EquipmentCategory`, `Asset` | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-photo` → draft | Отдаёт asset/site по id для dashboard/ai |
+| **dashboard-service** | `WorkOrder` (type: `corrective` \| `preventive`), `JournalEntry`, `MaintenancePlan`, `Checklist`, чек-лист на заявке, scheduler | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries`, `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar`, `POST /work-orders/text`, `POST /work-orders/{id}/closeout/text` | Стейт-машина §6.1; scheduler создаёт preventive WO внутри сервиса |
 | **document-service** | `Document` (метаданные), ссылки на blob | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` | Upload в S3; после commit → `document.attached` |
 | **report-service** | read models, `report_templates`, `export_jobs` | `GET /reports/*`, `GET /export/journal`, `POST /reports/run` | Только read; строит проекции из событий |
 | **notification-service** | `notification_preferences`, `delivery_log` | `GET /notifications`, `PUT /notifications/preferences` | Слушает события; FCM/APNs, SMTP |
-| **ai-gateway** | `agent_run_log`, конфиг агентов | `POST /ai/passportist`, `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/technologist` | Детерминированная маршрутизация §4.2; tools → draft в catalog/work |
+| **ai-gateway** | `agent_run_log`, конфиг агентов | `POST /ai/passportist`, `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/technologist` | Детерминированная маршрутизация §4.2; tools → draft в catalog/dashboard |
 | **search-service** | индексы Onyx per asset/org | `GET /search/docs`, `POST /search/reindex` | Индексирует по `document.attached`; read-only для Наставника |
 
 **Auth (Zitadel)** и **blob storage (S3/MinIO)** — внешние; не наши микросервисы.
@@ -971,7 +971,7 @@ flowchart TB
 |--------|-----|------------|
 | access | `access_db` | Мало данных, частые чтения — Redis-кэш site access |
 | catalog | `catalog_db` | Asset + Category + Site |
-| work | `work_db` | WorkOrder (corrective + preventive), JournalEntry, MaintenancePlan, Checklist, scheduler |
+| dashboard | `dashboard_db` | WorkOrder (corrective + preventive), JournalEntry, MaintenancePlan, Checklist, scheduler |
 | document | `document_db` | Метаданные; файлы в S3 |
 | report | `report_db` | Денормализованные проекции; можно отставать от write |
 | notification | `notification_db` | Очередь доставки, лог |
@@ -987,14 +987,14 @@ flowchart TB
 | Событие | Publisher | Consumers | Зачем |
 |---------|-----------|-----------|-------|
 | `asset.draft.created` | catalog | notification | Админу: подтвердить карточку от Паспортиста |
-| `document.attached` | document | search, ai-gateway | Индексация + Технолог (фаза 2) → draft в work |
-| `work_order.draft.created` | work | notification | Диспетчеру: подтвердить draft от Приёмщика или Технолога |
-| `work_order.status.changed` | work | notification, report | Push + обновление проекций |
-| `work_order.closed` | work | report | Агрегаты просрочек, повторов |
-| `journal.entry.created` | work | report | Журналы в выгрузках |
-| `maintenance_plan.approved` | work | notification | Админу: регламент активирован, первая preventive WO создана |
+| `document.attached` | document | search, ai-gateway | Индексация + Технолог (фаза 2) → draft в dashboard |
+| `work_order.draft.created` | dashboard | notification | Диспетчеру: подтвердить draft от Приёмщика или Технолога |
+| `work_order.status.changed` | dashboard | notification, report | Push + обновление проекций |
+| `work_order.closed` | dashboard | report | Агрегаты просрочек, повторов |
+| `journal.entry.created` | dashboard | report | Журналы в выгрузках |
+| `maintenance_plan.approved` | dashboard | notification | Админу: регламент активирован, первая preventive WO создана |
 
-**Правило:** AI-агенты **не пишут напрямую** в чужие сервисы — только `createDraft*` через внутренний API catalog/work (инвариант §4.1). Плановое ТО — те же `WorkOrder` с `type: preventive`, без отдельного сервиса.
+**Правило:** AI-агенты **не пишут напрямую** в чужие сервисы — только `createDraft*` через внутренний API catalog/dashboard (инвариант §4.1). Плановое ТО — те же `WorkOrder` с `type: preventive`, без отдельного сервиса.
 
 #### Сквозные сценарии
 
@@ -1005,7 +1005,7 @@ sequenceDiagram
   actor E as Инженер
   participant GW as Gateway
   participant AI as ai-gateway
-  participant WRK as work-service
+  participant DSH as dashboard-service
   participant CAT as catalog-service
   participant BUS as NATS
   participant NTF as notification-service
@@ -1014,10 +1014,10 @@ sequenceDiagram
   GW->>AI: маршрут → Приёмщик
   AI->>CAT: findAsset, findDuplicates
   AI->>ACC: checkFeatureFlag (если requester)
-  AI->>WRK: createDraftWorkOrder
-  WRK->>BUS: work_order.draft.created
+  AI->>DSH: createDraftWorkOrder
+  DSH->>BUS: work_order.draft.created
   BUS->>NTF: push диспетчеру
-  WRK-->>E: draft WorkOrder (ожидает подтверждения)
+  DSH-->>E: draft WorkOrder (ожидает подтверждения)
 ```
 
 **Добавление документации → Технолог (фаза 2):**
@@ -1029,15 +1029,15 @@ sequenceDiagram
   participant BUS as NATS
   participant SRCH as search-service
   participant AI as ai-gateway
-  participant WRK as work-service
+  participant DSH as dashboard-service
 
   A->>DOC: POST /documents (PDF к активу)
   DOC->>BUS: document.attached
   BUS->>SRCH: индексация
   BUS->>AI: Технолог
-  AI->>WRK: createDraftPlan + createDraftChecklist
-  AI->>WRK: createDraftWorkOrder (type: preventive)
-  WRK-->>A: пакет черновиков на подтверждение
+  AI->>DSH: createDraftPlan + createDraftChecklist
+  AI->>DSH: createDraftWorkOrder (type: preventive)
+  DSH-->>A: пакет черновиков на подтверждение
 ```
 
 #### API Gateway
@@ -1046,7 +1046,7 @@ sequenceDiagram
 |--------|------------|
 | TLS termination | Traefik / nginx ingress |
 | JWT validation | JWKS от Zitadel; кэш ключей |
-| Routing | `/api/v1/sites` → catalog, `/api/v1/work-orders` → work, … |
+| Routing | `/api/v1/sites` → catalog, `/api/v1/work-orders` → dashboard, … |
 | Rate limiting | Per org_id; жёстче на `/ai/*` |
 | CORS | Только домены web-клиента |
 | Request context | Проброс `X-Org-Id`, `X-User-Id`, `X-Roles` в internal headers после валидации JWT |
@@ -1062,25 +1062,25 @@ sequenceDiagram
 | Брокер | **NATS JetStream** | Легче Kafka для нашего масштаба; persistence из коробки |
 | Object storage | MinIO (dev) / S3-compatible (prod) | Документы и фото |
 | Миграции | Flyway per service | Независимые schema |
-| Observability | OpenTelemetry + structured logs | `correlationId` сквозь gateway → ai → work |
+| Observability | OpenTelemetry + structured logs | `correlationId` сквозь gateway → ai → dashboard |
 | Деплой MVP | Docker Compose (dev), Kubernetes (prod) | 7 сервисов + gateway + NATS + PG + MinIO |
 
 #### Фазы выката сервисов
 
 | Фаза | Деплои | Комментарий |
 |------|--------|-------------|
-| **MVP** | gateway, access, catalog, work, document, report (stub) | catalog+work — критический путь; report может читать work_db read-replica на старте |
+| **MVP** | gateway, access, catalog, dashboard, document, report (stub) | catalog+dashboard — критический путь; report может читать dashboard_db read-replica на старте |
 | **1.1** | + ai-gateway, search, notification | Приёмщик, Наставник, Писарь, push |
-| **2** | work-service: + MaintenancePlan, Checklist, scheduler, календарь | Технолог (draft-пакет в work) |
+| **2** | dashboard-service: + MaintenancePlan, Checklist, scheduler, календарь | Технолог (draft-пакет в dashboard) |
 | **3** | report → полноценные проекции | Конструктор отчётов для reporter |
 
-На MVP допустимо **физически объединить** `catalog + work` в один deployable (`core-service`), но **логически держать раздельными модулями** с разными schema и контрактами — чтобы split был без переписывания.
+На MVP допустимо **физически объединить** `catalog + dashboard` в один deployable (`core-service`), но **логически держать раздельными модулями** с разными schema и контрактами — чтобы split был без переписывания.
 
 #### Антипаттерны (чего не делаем)
 
 - **Распределённые 2PC-транзакции** — только saga через события; draft-пакет Технолога: partial failure → retry + dead letter
 - **Общая write-БД** на все сервисы — только read-replica для report
-- **Синхронные цепочки** gateway → ai → work → catalog → notification в одном HTTP-запросе — AI отвечает быстро с draft id, push уходит асинхронно
+- **Синхронные цепочки** gateway → ai → dashboard → catalog → notification в одном HTTP-запросе — AI отвечает быстро с draft id, push уходит асинхронно
 - **Агент-оркестратор** — маршрутизация детерминирована (§4.2), не LLM-роутер
 
 Новые endpoint'ы поверх черновика API из B2B_MVP_SCOPE: `POST /assets/from-photo` (шильдик → draft), `POST /documents` (добавление документации к активу → событие для Технолога), `POST /documents/{id}/analyze-maintenance` (ручной перезапуск анализа), `GET/POST /maintenance-plans`, `POST /work-orders/text` (текст/фото → draft), `POST /work-orders/{id}/closeout/text`.

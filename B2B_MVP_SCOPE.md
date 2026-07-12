@@ -141,9 +141,9 @@ flowchart TB
 |--------|---------------------------|
 | access-service | `GET /me`, `GET/PUT /org/settings`, `GET/PUT /users/{id}/sites` |
 | catalog-service | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-photo` |
-| work-service | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries` |
+| dashboard-service | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries` |
 | document-service | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` |
-| report-service | `GET /export/journal` (stub; read-replica work_db на старте) |
+| report-service | `GET /export/journal` (stub; read-replica dashboard_db на старте) |
 
 ### Сервисы фазы 1.1+
 
@@ -153,12 +153,12 @@ flowchart TB
 | search-service | `GET /search/docs` |
 | notification-service | push по событиям (без публичного API в MVP) |
 
-### Сервисы фазы 2 (расширение work-service, без нового deployable)
+### Сервисы фазы 2 (расширение dashboard-service, без нового deployable)
 
 | Сервис | Endpoint'ы |
 |--------|-------------|
-| work-service | `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar?type=preventive`; `WorkOrder.type`: `corrective` \| `preventive` |
-| ai-gateway | `POST /ai/technologist` → draft-пакет в work-service |
+| dashboard-service | `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar?type=preventive`; `WorkOrder.type`: `corrective` \| `preventive` |
+| ai-gateway | `POST /ai/technologist` → draft-пакет в dashboard-service |
 
 ### Инфраструктура
 
