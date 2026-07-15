@@ -516,7 +516,7 @@ sequenceDiagram
 | Слой | Решение |
 |------|---------|
 | Клиенты | KMP (Decompose, MVIKotlin) — Android для инженера, Web для диспетчера (как в B2B_MVP_SCOPE); авторизованный web/mobile/бот для пользователей объекта только при включённой фиче `userRequestsEnabled` |
-| **Auth** | **Zitadel Cloud** — внешний OIDC-провайдер; вход только по **email + пароль**, регистрация **только по invite** (§8.1) |
+| **Auth** | **Zitadel self-host (РФ)** — OIDC; вход только по **email + пароль**, регистрация **только по invite** (§8.1); канон — [`masterdoc-zitadel`](https://github.com/AntonButov/masterdoc-zitadel) |
 | Backend | REST + PostgreSQL (обязательна, см. B2B_MVP_SCOPE); объектное хранилище для фото/PDF |
 | AI-слой | Мультиагентный (§4.2): общий рантайм агентов + декларативные определения (промпт, источники знаний, tools, модель — конфиг на агента); RAG-инфраструктура (Onyx-контур из B2C Atlant) как разделяемый сервис, но индексы скоупятся на агента |
 | Маршрутизация | Детерминированная: канал входа / экран / тип действия → конкретный агент; без агента-оркестратора |
@@ -524,9 +524,13 @@ sequenceDiagram
 | Отчёты | SQL/ORM-запросы + предрасчитанные агрегаты + экспорт PDF/Excel; без LLM/AI-агента |
 | Качество | Per-agent eval-наборы и метрики (§4.2); логирование вызовов агентов для разбора ошибок извлечения |
 
-### 8.1 Авторизация (Zitadel Cloud)
+### 8.1 Авторизация (Zitadel self-host, РФ)
 
-Аутентификация вынесена во **внешний облачный сервис** — не храним пароли в своём backend. Выбран **Zitadel Cloud** (managed OIDC): B2B-модель организаций из коробки, фиксированные роли, стандартный OIDC для KMP/Android и Web.
+Аутентификация вынесена во **IdP Zitadel**; пароли не храним в своём application backend. **Hosting:** self-host Zitadel + Postgres на инфраструктуре в **России** (Docker) — не Zitadel Cloud (у Cloud нет региона РФ; требование локализации ПДн / 152-ФЗ).
+
+**Канон, deploy, Terraform platform, verify:** приватный репозиторий [`AntonButov/masterdoc-zitadel`](https://github.com/AntonButov/masterdoc-zitadel) (`docs/AUTHORIZATION.md`, `docs/RUNBOOK.md`). Ниже — краткий продуктный обзор.
+
+OIDC B2B (Organization = клиент), фиксированные роли, стандартный OIDC для KMP/Android и Web.
 
 #### Методы входа (первые релизы)
 
@@ -559,7 +563,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   actor A as Admin
-  participant Z as Zitadel Cloud
+  participant Z as Zitadel self-host
   actor U as Пользователь
   participant C as KMP / Web
   participant API as REST API
@@ -595,14 +599,14 @@ Backend **не реализует** `POST /auth/login` с собственной
 
 Роли в Zitadel и доступ к объектам в приложении — **два разных слоя**: роль определяет *что можно делать*, site access — *на каких объектах*.
 
-#### Почему Zitadel Cloud, а не альтернативы
+#### Почему Zitadel (self-host), а не альтернативы
 
 | Сервис | Вердикт для TOiR |
 |--------|------------------|
-| **Zitadel Cloud** | ✅ выбран: B2B org + роли, облако, OIDC, нейтрален к стеку (KMP + REST) |
+| **Zitadel self-host в РФ** | ✅ выбран: B2B org + роли, OIDC, стек-нейтрален; ПДн на своём Postgres в РФ (Cloud без региона РФ — не используем) |
 | Clerk | Хорош для React/Next.js, но сильнее привязан к фронтенд-экосистеме |
 | Auth0 | Избыточен и дороже для MVP с 1–20 пользователями на клиента |
-| Supabase / Firebase Auth | Org + RBAC пришлось бы строить в своём backend |
+| Supabase / Firebase Auth | Org + RBAC пришлось бы строить в своём backend; резидентность — отдельно |
 
 Новые endpoint'ы поверх черновика API из B2B_MVP_SCOPE: `POST /assets/from-photo` (шильдик → draft), `POST /documents` (добавление документации к активу → событие для Технолога), `POST /documents/{id}/analyze-maintenance` (ручной перезапуск анализа), `GET/POST /maintenance-plans`, `POST /work-orders/text` (текст/фото → draft), `POST /work-orders/{id}/closeout/text`.
 

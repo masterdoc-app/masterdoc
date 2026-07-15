@@ -90,7 +90,7 @@ flowchart TB
 | 5 | Поиск по документам | engineer | Текстовый поиск; опционально Onyx RAG по document set |
 | 6 | Выгрузка журнала и отчёты | admin, reporter | PDF/Excel за период по объекту или сети |
 | 7 | Список заявок по сети | dispatcher | Фильтр по объекту, статусу, просрочке |
-| 8 | Auth + org scope | all | JWT от Zitadel Cloud; пользователь видит только свою организацию и доступные объекты |
+| 8 | Auth + org scope | all | OIDC Zitadel **self-host РФ** → JWT; identity = `sub`; см. §8.1 и private [`masterdoc-zitadel`](https://github.com/AntonButov/masterdoc-zitadel) |
 
 ### Should-have (релиз 1.1, сразу после MVP)
 
@@ -117,7 +117,7 @@ flowchart TB
 
 | Экран | Описание |
 |-------|----------|
-| Login | email + пароль через Zitadel Cloud (OIDC); регистрация только по invite от admin |
+| Login | email + пароль через Zitadel self-host (OIDC); регистрация только по invite от admin |
 | Home dispatcher | Открытые заявки, счётчики по объектам |
 | Sites list | Объекты сети |
 | Site detail | Оборудование на объекте + быстрые действия |
