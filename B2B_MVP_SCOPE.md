@@ -83,23 +83,24 @@ flowchart TB
 
 | # | Функция | Роль | Критерий готовности |
 |---|---------|------|---------------------|
-| 1 | Справочник объектов и оборудования | admin | CRUD объектов, категорий оборудования и активов |
+| 1 | Справочник объектов и оборудования | dispatcher (+ admin: только типы `EquipmentCategory`) | CRUD объектов и активов; admin — CRUD категорий типов |
 | 2 | Заявка на ремонт | engineer, dispatcher | Создание с существующего asset, статусы: новая → в работе → закрыта |
 | 3 | Журнал событий | engineer | Запись неисправности/ТО/устранения с привязкой к asset |
-| 4 | Документы на оборудовании | admin, engineer | Загрузка PDF, просмотр, список по asset |
+| 4 | Документы на оборудовании | dispatcher, engineer | Загрузка PDF — dispatcher; просмотр — engineer |
 | 5 | Поиск по документам | engineer | Текстовый поиск; опционально Onyx RAG по document set |
-| 6 | Выгрузка журнала и отчёты | admin, reporter | PDF/Excel за период по объекту или сети |
+| 6 | Выгрузка журнала и отчёты | reporter | PDF/Excel за период по объекту или сети |
 | 7 | Список заявок по сети | dispatcher | Фильтр по объекту, статусу, просрочке |
-| 8 | Auth + org scope | all | OIDC Zitadel **self-host РФ** → JWT; identity = `sub`; см. §8.1 и private [`masterdoc-zitadel`](https://github.com/AntonButov/masterdoc-zitadel) |
+| 8 | Auth + org scope | all | OIDC Zitadel **self-host РФ** → JWT; identity = `sub`; см. §8.1 и private [`masterdoc-zitadel`](https://github.com/masterdoc-app/masterdoc-zitadel) |
+| 9 | Конфигурация системы | admin | Invite, роли, `user_site_access`, feature flags, `EquipmentCategory` |
 
 ### Should-have (релиз 1.1, сразу после MVP)
 
 | # | Функция |
 |---|---------|
-| 9 | Фото к заявке и записи журнала |
-| 10 | Push / уведомление диспетчеру о новой заявке |
-| 11 | AI-наставник по документации asset |
-| 12 | Офлайн-черновик заявки (mobile) |
+| 10 | Фото к заявке и записи журнала |
+| 11 | Push / уведомление диспетчеру о новой заявке |
+| 12 | AI-наставник по документации asset |
+| 13 | Офлайн-черновик заявки (mobile) |
 
 ### Won't-have в MVP
 
@@ -133,19 +134,42 @@ flowchart TB
 
 ## Backend MVP
 
-| Endpoint (черновик) | Назначение |
-|---------------------|------------|
-| `GET /me` | Профиль текущего пользователя (из JWT + site access) |
-| `GET/POST /sites` | Объекты |
-| `GET/POST /assets` | Оборудование |
-| `GET/POST /work-orders` | Заявки |
-| `GET/POST /journal-entries` | Журнал |
-| `POST /documents` | Upload |
-| `GET /documents/{id}` | Download |
-| `GET /export/journal` | Выгрузка |
-| `POST /chat/...` | Существующий Onyx (опционально привязка persona к asset) |
+Архитектура: **микросервисы** (см. [TOIR_AI_SYSTEM_DESIGN.md §8.2](TOIR_AI_SYSTEM_DESIGN.md#82-микросервисная-архитектура-backend)). Клиент ходит только в API Gateway; сервисы общаются через REST (sync) и NATS (async).
 
-**Хранение v1:** REST + серверная БД (PostgreSQL) — в [AGENTS.md](../masterdocapp/AGENTS.md) указано «без локальной БД в v1» для текущего клиента; для B2B серверная БД **обязательна**.
+### Сервисы фазы 1 (MVP)
+
+| Сервис | Endpoint'ы (через gateway) |
+|--------|---------------------------|
+| access-service | `GET /me`, `GET/PUT /org/settings`, `GET/PUT /users/{id}/sites` |
+| catalog-service | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-photo` |
+| dashboard-service | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries` |
+| document-service | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` |
+| report-service | `GET /export/journal` (stub; read-replica dashboard_db на старте) |
+
+### Сервисы фазы 1.1+
+
+| Сервис | Endpoint'ы |
+|--------|-------------|
+| ai-gateway | `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/passportist` |
+| search-service | `GET /search/docs` |
+| notification-service | push по событиям (без публичного API в MVP) |
+
+### Сервисы фазы 2 (расширение dashboard-service, без нового deployable)
+
+| Сервис | Endpoint'ы |
+|--------|-------------|
+| dashboard-service | `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar?type=preventive`; `WorkOrder.type`: `corrective` \| `preventive` |
+| ai-gateway | `POST /ai/technologist` → draft-пакет в dashboard-service |
+
+### Инфраструктура
+
+| Компонент | Назначение |
+|-----------|------------|
+| API Gateway | JWT (Zitadel), routing, rate limit |
+| PostgreSQL | schema per service (один кластер на MVP) |
+| NATS JetStream | domain events |
+| MinIO / S3 | PDF, фото |
+| Onyx | RAG-индексы (search-service) |
 
 ---
 

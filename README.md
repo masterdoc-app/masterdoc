@@ -27,7 +27,7 @@
 
 - [masterdocapp](https://github.com/masterdoc-app/masterdocapp) — KMP клиент  
 - [backend](../backend/) — API и Onyx  
-- [masterdoc-zitadel](https://github.com/AntonButov/masterdoc-zitadel) — IdP Zitadel **self-host (РФ)**: docs, Docker, Terraform, verify  
+- [masterdoc-zitadel](https://github.com/masterdoc-app/masterdoc-zitadel) — IdP Zitadel **self-host (РФ)**: docs, Docker, Terraform, verify  
 
 Auth: [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) §8.1 + private `masterdoc-zitadel`.
 
