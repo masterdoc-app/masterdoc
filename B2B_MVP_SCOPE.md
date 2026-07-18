@@ -91,7 +91,7 @@ flowchart TB
 | 6 | Выгрузка журнала и отчёты | reporter | PDF/Excel за период по объекту или сети |
 | 7 | Список заявок по сети | dispatcher | Фильтр по объекту, статусу, просрочке |
 | 8 | Auth + org scope | all | OIDC Zitadel **self-host РФ** → JWT; identity = `sub`; см. TOIR_AI_SYSTEM_DESIGN §4 (zitadel) и private [`masterdoc-zitadel`](https://github.com/masterdoc-app/masterdoc-zitadel) |
-| 9 | Конфигурация системы | admin | Invite, роли, `user_site_access`, feature flags, `EquipmentCategory` |
+| 9 | Конфигурация системы | admin | Invite, роли, `EquipmentCategory`; фичи org/user — через feature-service |
 
 ### Should-have (релиз 1.1, сразу после MVP)
 
@@ -140,7 +140,7 @@ flowchart TB
 
 | Сервис | Endpoint'ы (через gateway) |
 |--------|---------------------------|
-| access-service | `GET /me`, `GET/PUT /org/settings`, `GET/PUT /users/{id}/sites` |
+| feature-service | `GET /me` → список фич, включённых у user в org (клиентский DI строит приложение: напр. dispatcher → `dashboard`, `graphics`) |
 | catalog-service | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-documents` (Технолог: доки + оборудование → карточки автоматически) |
 | dashboard-service | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries` |
 | document-service | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` |

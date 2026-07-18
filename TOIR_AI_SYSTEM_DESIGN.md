@@ -25,13 +25,13 @@
 
 | Роль | Клиент | Зона |
 |------|--------|------|
-| `admin` | Web | Пользователи, роли, invite, `user_site_access`, feature flags, `EquipmentCategory`; загрузка **доков + оборудования** → Технолог; подтверждение пакета карточек (Asset + график ТО) |
+| `admin` | Web | Пользователи, роли, invite, `EquipmentCategory`; загрузка **доков + оборудования** → Технолог; подтверждение пакета карточек (Asset + график ТО) |
 | `dispatcher` | Web | Site, доска WO, входящие draft от Приёмщика, назначения, календарь ТО |
 | `engineer` | Android | Заявки, чек-лист, документы актива, Copilot, закрытие; QR/шильдик в поле |
-| `requester` | Web/mobile/бот | Внеочередная заявка только если `userRequestsEnabled` |
+| `requester` | Web/mobile/бот | Внеочередная заявка только если feature `userRequests` включён |
 | `reporter` | Web | Read-only отчёты и выгрузки |
 
-JWT: `org_id` + `roles`. Доступ к Site — таблица `user_site_access` в access-service.
+JWT: `org_id` + `roles`. После логина клиент вызывает `GET /me` (**feature-service**) → список включённых фич для user×org → по ним **DI собирает приложение** (экраны, графы, модули).
 
 ---
 
@@ -55,7 +55,7 @@ JWT: `org_id` + `roles`. Доступ к Site — таблица `user_site_acce
 | Сервис | Данные | API |
 |--------|--------|-----|
 | **zitadel** (IdP) | Organization, User, Project roles, invite | OIDC: Authorization Code + PKCE; выдаёт JWT. Клиенты ходят в Zitadel напрямую (не через наш gateway). Канон: [`masterdoc-zitadel`](https://github.com/masterdoc-app/masterdoc-zitadel). Self-host РФ |
-| **access-service** | users/roles mirror, `user_site_access`, org settings | через gateway: `/me`, `/org/settings`, `/users/{id}/sites` |
+| **feature-service** | матрица фич user×org (роль + org flags) | единственный метод: `GET /me` → `{ features: ["dashboard", "graphics", …] }`. Клиентский DI по этому списку собирает приложение (диспетчер → dashboard, graphics; инженер → другие модули) |
 | **catalog-service** | Site, EquipmentCategory, Asset | `/sites`, `/assets`, `/equipment-categories`, `/assets/from-documents` |
 | **dashboard-service** | WorkOrder, JournalEntry, MaintenancePlan, Checklist, scheduler | `/work-orders`, `/journal-entries`; фаза 2: `/maintenance-plans`, `/checklists`, calendar |
 | **document-service** | meta документов; файлы в MinIO | `/documents`, `/assets/{id}/documents` |
@@ -83,8 +83,8 @@ JWT: `org_id` + `roles`. Доступ к Site — таблица `user_site_acce
 
 | Фаза | Backend / UI | AI |
 |------|--------------|-----|
-| **MVP** | zitadel, access, catalog, dashboard (WO+journal), document, report stub | Технолог |
-| **1.1** | push, QR, `userRequestsEnabled` | Приёмщик, Наставник, Писарь |
+| **MVP** | zitadel, feature, catalog, dashboard (WO+journal), document, report stub | Технолог |
+| **1.1** | push, QR, feature `userRequests` | Приёмщик, Наставник, Писарь |
 | **2** | MaintenancePlan, Checklist, scheduler, календарь | пакет Технолога полностью в UI |
 | **3** | конструктор отчётов | — |
 | **Backlog** | склад ЗИП, contractor | — |
