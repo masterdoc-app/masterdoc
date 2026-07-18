@@ -90,7 +90,7 @@ flowchart TB
 | 5 | Поиск по документам | engineer | Текстовый поиск; опционально Onyx RAG по document set |
 | 6 | Выгрузка журнала и отчёты | reporter | PDF/Excel за период по объекту или сети |
 | 7 | Список заявок по сети | dispatcher | Фильтр по объекту, статусу, просрочке |
-| 8 | Auth + org scope | all | OIDC Zitadel **self-host РФ** → JWT; identity = `sub`; см. §8.1 и private [`masterdoc-zitadel`](https://github.com/masterdoc-app/masterdoc-zitadel) |
+| 8 | Auth + org scope | all | OIDC Zitadel **self-host РФ** → JWT; identity = `sub`; см. TOIR_AI_SYSTEM_DESIGN §6 (Auth) и private [`masterdoc-zitadel`](https://github.com/masterdoc-app/masterdoc-zitadel) |
 | 9 | Конфигурация системы | admin | Invite, роли, `user_site_access`, feature flags, `EquipmentCategory` |
 
 ### Should-have (релиз 1.1, сразу после MVP)
@@ -134,7 +134,7 @@ flowchart TB
 
 ## Backend MVP
 
-Архитектура: **микросервисы** (см. [TOIR_AI_SYSTEM_DESIGN.md §8.2](TOIR_AI_SYSTEM_DESIGN.md#82-микросервисная-архитектура-backend)). Клиент ходит только в API Gateway; сервисы общаются через REST (sync) и NATS (async).
+Архитектура: **микросервисы** (см. [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) §6). Клиент ходит только в API Gateway; сервисы общаются через REST (sync) и NATS (async).
 
 ### Сервисы фазы 1 (MVP)
 

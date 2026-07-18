@@ -7,7 +7,7 @@
 | Документ | Назначение |
 |----------|------------|
 | [STRATEGY.md](STRATEGY.md) | ICP, one-liner, GTM, метрики |
-| [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) | **Проект системы ТОиР для малого бизнеса: конкуренты, AI-агенты, стейты, рабочие места** |
+| [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) | **Техдизайн ТОиР: модель данных, стейты, агенты, сервисы** |
 | [DIGITIZATION_SEARCH_INTENT.md](DIGITIZATION_SEARCH_INTENT.md) | **Что ищут те, кто хочет оцифровать журналы и ИД** |
 | [SEO_KEYWORDS.md](SEO_KEYWORDS.md) | Матрица Wordstat для лендинга и рекламы |
 | [WORDSTAT_TOIR_AUTOMATION_LEADS.md](../masterdoc-toir/WORDSTAT_TOIR_AUTOMATION_LEADS.md) | **ТОиР: лиды на автоматизацию** (без 1С и журналов), свежий Wordstat |
@@ -29,7 +29,7 @@
 - [backend](../backend/) — API и Onyx  
 - [masterdoc-zitadel](https://github.com/masterdoc-app/masterdoc-zitadel) — IdP Zitadel **self-host (РФ)**: docs, Docker, Terraform, verify  
 
-Auth: [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) §8.1 + private `masterdoc-zitadel`.
+Auth: [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) §6 + private `masterdoc-zitadel`.
 
 ## Лендинг
 
