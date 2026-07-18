@@ -134,13 +134,14 @@ flowchart TB
 
 ## Backend MVP
 
-Архитектура: **микросервисы** (см. [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) §4). Клиент ходит только в API Gateway; сервисы общаются через REST (sync) и NATS (async).
+Архитектура: **микросервисы** (см. [TOIR_AI_SYSTEM_DESIGN.md](TOIR_AI_SYSTEM_DESIGN.md) §4). Клиент знает **один API base** — `https://api.masterdoc.pro` (api-gateway). Login — `https://auth.formaverse.ru`. Сервисы за gateway общаются через REST (sync) и NATS (async).
 
 ### Сервисы фазы 1 (MVP)
 
-| Сервис | Endpoint'ы (через gateway) |
-|--------|---------------------------|
-| feature-service | `GET /me` → список фич, включённых у user в org (клиентский DI строит приложение: напр. dispatcher → `dashboard`, `graphics`) |
+| Сервис | Endpoint'ы |
+|--------|-------------|
+| api-gateway | публично: `GET /health`, `GET /me`, `/v1/*` → backend; blue-green |
+| feature-service | внутренний `GET /me` → `userInfo` + фичи (dispatcher → `board`; engineer → `copilot`) |
 | catalog-service | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-documents` (Технолог: доки + оборудование → карточки автоматически) |
 | dashboard-service | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries` |
 | document-service | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` |
@@ -165,7 +166,7 @@ flowchart TB
 
 | Компонент | Назначение |
 |-----------|------------|
-| API Gateway | JWT (Zitadel), routing, rate limit |
+| API Gateway | `api-gateway-service` (Ktor): единственный `https://api.masterdoc.pro`; JWT на `/me`; blue-green |
 | PostgreSQL | schema per service (один кластер на MVP) |
 | NATS JetStream | domain events |
 | MinIO / S3 | PDF, фото |
