@@ -141,7 +141,7 @@ flowchart TB
 | Сервис | Endpoint'ы (через gateway) |
 |--------|---------------------------|
 | access-service | `GET /me`, `GET/PUT /org/settings`, `GET/PUT /users/{id}/sites` |
-| catalog-service | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-photo` |
+| catalog-service | `GET/POST /sites`, `GET/POST /assets`, `GET/POST /equipment-categories`, `POST /assets/from-documents` (Технолог: доки + оборудование → карточки автоматически) |
 | dashboard-service | `GET/POST /work-orders`, `PATCH /work-orders/{id}/status`, `GET/POST /journal-entries` |
 | document-service | `POST /documents`, `GET /documents/{id}`, `GET /assets/{id}/documents` |
 | report-service | `GET /export/journal` (stub; read-replica dashboard_db на старте) |
@@ -150,7 +150,7 @@ flowchart TB
 
 | Сервис | Endpoint'ы |
 |--------|-------------|
-| ai-gateway | `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/passportist` |
+| ai-gateway | `POST /ai/intake`, `POST /ai/mentor`, `POST /ai/scribe`, `POST /ai/technologist` (доки + оборудование → карточки автоматически) |
 | search-service | `GET /search/docs` |
 | notification-service | push по событиям (без публичного API в MVP) |
 
@@ -159,7 +159,7 @@ flowchart TB
 | Сервис | Endpoint'ы |
 |--------|-------------|
 | dashboard-service | `GET/POST /maintenance-plans`, `GET/POST /checklists`, `GET /work-orders/calendar?type=preventive`; `WorkOrder.type`: `corrective` \| `preventive` |
-| ai-gateway | `POST /ai/technologist` → draft-пакет в dashboard-service |
+| ai-gateway | `POST /ai/technologist` → карточки автоматически (Asset + план + checklist + preventive WO) в catalog/dashboard; шильдик не вход |
 
 ### Инфраструктура
 
