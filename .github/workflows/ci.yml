@@ -15,10 +15,22 @@ env:
   DEPLOY_REMOTE_PATH: /var/www/masterdoc
 
 jobs:
+  check:
+    name: Check landing files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify landing
+        run: |
+          test -f landing/index.html
+          test -d landing/assets
+          echo "Landing OK"
+
   deploy:
     name: Deploy static site
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    needs: check
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     permissions:
       contents: read
 
