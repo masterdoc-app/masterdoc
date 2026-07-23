@@ -1,62 +1,81 @@
 # Equipment + Technologist Agent (draft-only)
 
 **Date:** 2026-07-22  
-**Status:** implementation contract  
-**Related:** [TOIR_AI_SYSTEM_DESIGN.md](../../TOIR_AI_SYSTEM_DESIGN.md), [B2B_MVP_SCOPE.md](../../B2B_MVP_SCOPE.md)
+**Status:** implementation contract (synced with services)  
+**Related:** [TOIR_AI_SYSTEM_DESIGN.md](../../TOIR_AI_SYSTEM_DESIGN.md), [B2B_MVP_SCOPE.md](../../B2B_MVP_SCOPE.md), [maintenance-map practices](2026-07-22-maintenance-map-practices.md)
 
 ## Product invariant
 
-The Technologist agent **never** publishes to the operational ledger. All writes via MCP tools create records with:
+Technologist **never** publishes to the operational ledger. MCP writes always create:
 
 - `status: draft`
 - `source: ai_generated`
 
-A human with feature `equipment` confirms (`draft` → `active`) or rejects in the client UI.
+A human with feature `equipment` confirms (`draft` → `active`) or rejects in the client.
 
-## Public API (api-gateway)
+## Auth
 
-All paths require `Authorization: Bearer <JWT>` and feature `equipment` (except where noted).
+Client calls gateway with `Authorization: Bearer <JWT>` and feature `equipment`. Services trust `X-Org-Id` / `X-User-Id` (default `default-org` / `unknown` if absent).
 
-### Documents
+## Public API
 
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| POST | `/documents` | `multipart/form-data` file (PDF) | `Document` |
-| GET | `/documents/{id}` | — | `Document` |
+Paths below are what the client hits on the gateway base URL; each maps 1:1 to the owning service.
 
-### Assets (catalog-service)
+### Documents · `document-service` :8093
 
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| POST | `/assets` | `CreateAssetRequest` | `Asset` (may be draft) |
-| GET | `/assets` | — | `{ items: Asset[] }` |
-| GET | `/assets/{id}` | — | `Asset` |
-| POST | `/assets/{id}/confirm` | — | `Asset` (active) |
-| POST | `/assets/{id}/reject` | — | 204 |
+| Method | Path | Response |
+|--------|------|----------|
+| POST | `/documents` | multipart PDF → `Document` 201 |
+| GET | `/documents?folder=` | `{ items: Document[] }` — folder = storageKey prefix; default = `orgId` |
+| GET | `/documents/{id}` | `Document` |
+| GET | `/documents/{id}/content` | PDF bytes (`Content-Type: application/pdf`, inline disposition) |
+| GET | `/documents/{id}/text` | `{ text }` — UTF-8 extract for the agent |
+| POST | `/documents/from-text` | `{ text, filename? }` → fake PDF fixture 201 |
 
-### Maintenance maps (dashboard-service)
+Storage: `{DOCUMENT_STORAGE_DIR}/{orgId}/{id}.pdf` + sidecar `{id}.meta.json`. Restart recovers metas from disk.
 
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| POST | `/maintenance-maps` | `CreateMaintenanceMapRequest` | `MaintenanceMap` |
-| GET | `/maintenance-maps?assetId=` | — | `{ items: MaintenanceMap[] }` |
-| GET | `/maintenance-maps/{id}` | — | `MaintenanceMap` |
-| PATCH | `/maintenance-maps/{id}` | `UpdateMaintenanceMapRequest` | `MaintenanceMap` |
-| POST | `/maintenance-maps/{id}/confirm` | — | `MaintenanceMap` |
-| POST | `/maintenance-maps/{id}/reject` | — | 204 |
+### Assets · `catalog-service` :8091
 
-### Technologist jobs
+| Method | Path | Response |
+|--------|------|----------|
+| POST | `/assets` | `CreateAssetRequest` → `Asset` |
+| GET | `/assets` | `{ items: Asset[] }` |
+| GET | `/assets/{id}` | `Asset` |
+| POST | `/assets/{id}/confirm` | `Asset` (active) |
+| POST | `/assets/{id}/reject` | 204 |
 
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| POST | `/ai/technologist` | `{ documentId, siteId? }` | `TechnologistJob` (202) |
-| GET | `/ai/technologist/jobs/{id}` | — | `TechnologistJob` |
-| POST | `/ai/technologist/jobs/{id}/confirm-package` | — | confirms asset + map |
+### Maintenance maps · `dashboard-service` :8092
+
+| Method | Path | Response |
+|--------|------|----------|
+| POST | `/maintenance-maps` | create (asset must exist in catalog) |
+| GET | `/maintenance-maps?assetId=` | `{ items }` |
+| GET | `/maintenance-maps/{id}` | map |
+| PATCH | `/maintenance-maps/{id}` | update draft fields |
+| POST | `/maintenance-maps/{id}/confirm` | active |
+| POST | `/maintenance-maps/{id}/reject` | 204 |
+
+### Technologist jobs · `technologist-service` :8095
+
+| Method | Path | Response |
+|--------|------|----------|
+| POST | `/ai/technologist` | `{ documentId, siteId? }` → job 202 (`siteId` default `default-site`) |
+| GET | `/ai/technologist/jobs/{id}` | job |
+| POST | `/ai/technologist/jobs/{id}/confirm-package` | confirms draft asset + map |
 
 ## DTOs
 
 ```json
 {
+  "Document": {
+    "id": "uuid",
+    "orgId": "string",
+    "filename": "string",
+    "contentType": "application/pdf",
+    "storageKey": "orgId/id.pdf",
+    "sha256": "hex",
+    "uploadedBy": "string"
+  },
   "Asset": {
     "id": "uuid",
     "orgId": "string",
@@ -64,9 +83,20 @@ All paths require `Authorization: Bearer <JWT>` and feature `equipment` (except 
     "name": "string",
     "inventoryNo": "string?",
     "category": "string?",
+    "description": "string?",
     "status": "draft|active",
     "source": "manual|ai_generated",
     "documentIds": ["uuid"]
+  },
+  "CreateAssetRequest": {
+    "name": "string",
+    "siteId": "string",
+    "inventoryNo": "string?",
+    "category": "string?",
+    "description": "string?",
+    "documentIds": ["uuid"],
+    "source": "manual|ai_generated",
+    "asDraft": true
   },
   "MaintenanceMapItem": {
     "id": "uuid",
@@ -85,18 +115,11 @@ All paths require `Authorization: Bearer <JWT>` and feature `equipment` (except 
     "source": "manual|ai_generated",
     "items": ["MaintenanceMapItem"]
   },
-  "Document": {
-    "id": "uuid",
-    "orgId": "string",
-    "filename": "string",
-    "contentType": "application/pdf",
-    "storageKey": "string",
-    "sha256": "string",
-    "uploadedBy": "string"
-  },
   "TechnologistJob": {
     "id": "uuid",
+    "orgId": "string",
     "documentId": "uuid",
+    "siteId": "string",
     "status": "queued|running|succeeded|failed",
     "draftAssetId": "uuid?",
     "draftMapId": "uuid?",
@@ -105,97 +128,38 @@ All paths require `Authorization: Bearer <JWT>` and feature `equipment` (except 
 }
 ```
 
-## MCP tool schemas (technologist-mcp)
+`ai_generated` or `asDraft=true` → asset starts as `draft`. Confirm/reject only via human (or `confirm-package` after a succeeded job).
 
-Tools **must not** include confirm/reject/publish.
+## MCP · `technologist-mcp` :8094
 
-### `create_draft_asset`
+`GET /mcp/tools` · `POST /mcp/tools/call` — **no** confirm/reject/publish tools.
 
-```json
-{
-  "name": "create_draft_asset",
-  "description": "Create a draft Asset from analyzed manual. Always status=draft, source=ai_generated.",
-  "inputSchema": {
-    "type": "object",
-    "required": ["name", "siteId", "documentIds"],
-    "properties": {
-      "name": { "type": "string" },
-      "siteId": { "type": "string" },
-      "inventoryNo": { "type": "string" },
-      "category": { "type": "string" },
-      "documentIds": { "type": "array", "items": { "type": "string" } }
-    }
-  }
-}
-```
+| Tool | Required args |
+|------|----------------|
+| `create_draft_asset` | `name`, `siteId`, `documentIds` (+ optional inventoryNo, category, description) |
+| `create_draft_maintenance_map` | `assetId`, `title`, `items[]` |
+| `update_draft_maintenance_map` | `id` + draft fields; only if `status=draft` |
+| `get_document_meta` | `documentId` |
 
-### `create_draft_maintenance_map`
+Item shape: `{ title, kind, interval: { every, unit }, criticality, sourceRef? }`.
 
-```json
-{
-  "name": "create_draft_maintenance_map",
-  "description": "Create a draft maintenance map bound to an asset (draft or active).",
-  "inputSchema": {
-    "type": "object",
-    "required": ["assetId", "title", "items"],
-    "properties": {
-      "assetId": { "type": "string" },
-      "title": { "type": "string" },
-      "items": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "required": ["title", "kind", "interval", "criticality"],
-          "properties": {
-            "title": { "type": "string" },
-            "kind": { "enum": ["inspection", "service", "overhaul"] },
-            "interval": {
-              "type": "object",
-              "required": ["every", "unit"],
-              "properties": {
-                "every": { "type": "integer", "minimum": 1 },
-                "unit": { "enum": ["days", "hours", "cycles"] }
-              }
-            },
-            "criticality": { "enum": ["low", "medium", "high"] },
-            "sourceRef": { "type": "string" }
-          }
-        }
-      }
-    }
-  }
-}
-```
+## Client notes
 
-### `update_draft_maintenance_map`
+- Feature nav: `#/equipment`, `#/ppr/{mapId}`.
+- PDF open: `GET /documents/{id}/content` with Bearer (`OpenAuthenticatedDocument` — web/desktop; Android stub).
+- Folder list uses `storageKey` parent (usually `orgId`) so manuals appear even if not yet linked on the asset.
 
-Same as create fields plus required `id`; only allowed when `status=draft`.
+## Ports
 
-### `get_document_meta`
-
-```json
-{
-  "name": "get_document_meta",
-  "description": "Read document metadata by id (no binary).",
-  "inputSchema": {
-    "type": "object",
-    "required": ["documentId"],
-    "properties": { "documentId": { "type": "string" } }
-  }
-}
-```
-
-## Service layout
-
-| Repo folder | Port (local) |
-|-------------|--------------|
+| Folder | Port |
+|--------|------|
 | `catalog-service` | 8091 |
 | `dashboard-service` | 8092 |
 | `document-service` | 8093 |
 | `technologist-mcp` | 8094 |
 | `technologist-service` | 8095 |
 
-## Non-goals (this epic)
+## Non-goals
 
 - Preventive WO calendar / scheduler
 - Intake / mentor / scribe agents
