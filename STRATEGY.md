@@ -118,6 +118,14 @@
 
 ---
 
+## AI-клин (эксперимент, 2026-07)
+
+**Ниша:** не чат по PDF (это уже HubEx AI), а **ИИ-наполнение ТОиР** — PDF → draft активов, ППР, чек-листов; человек подтверждает. Фича = агент Технолог + flag `equipment`.
+
+Канон эксперимента: [docs/ai-technologist-bootstrap-experiment.md](docs/ai-technologist-bootstrap-experiment.md).
+
+---
+
 ## Связь с другими треками продукта
 
 | Трек | Репозиторий | Роль |
@@ -125,3 +133,4 @@
 | B2B эксплуатация | master (стратегия), masterdocapp (будущий UI) | Основной GTM по этому документу |
 | B2C Atlant | masterdocapp, backend/Onyx | Пилот AI и базы знаний; может переиспользоваться как модуль «поиск по ИЭ» |
 | Pairio-паттерн | PRODUCT_NOTE.md | Референс UX для техника у станка, не юридическое копирование |
+| ИИ-наполнение (эксперимент) | technologist-service, feature `equipment` | Wedge: bootstrap из доков → затем Copilot |

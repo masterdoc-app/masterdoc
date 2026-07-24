@@ -1,7 +1,7 @@
 # Equipment + Technologist Agent (draft-only)
 
 **Date:** 2026-07-22  
-**Status:** implementation contract (synced with services)  
+**Status:** implementation contract (synced with services) · **GTM:** feature-эксперимент «ИИ-наполнение ТОиР» — [ai-technologist-bootstrap-experiment.md](../../ai-technologist-bootstrap-experiment.md)  
 **Related:** [TOIR_AI_SYSTEM_DESIGN.md](../../TOIR_AI_SYSTEM_DESIGN.md), [B2B_MVP_SCOPE.md](../../B2B_MVP_SCOPE.md), [maintenance-map practices](2026-07-22-maintenance-map-practices.md)
 
 ## Product invariant

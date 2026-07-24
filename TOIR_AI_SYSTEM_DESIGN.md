@@ -41,7 +41,7 @@ JWT: `org_id` + `roles`. После логина клиент вызывает *
 
 | Агент | Вход | Выход | Tools | Фаза |
 |-------|------|-------|-------|------|
-| **Технолог** | **Admin** загружает доки + оборудование (ИЭ / руководство по ремонту) | Карточки автоматически: draft Asset + plan + checklist + preventive WO (подтверждает admin) | `createDraftAsset`, `createDraftPlan`, `createDraftChecklist`, `createDraftWorkOrder(preventive)` | MVP |
+| **Технолог** | **Admin** загружает доки + оборудование (ИЭ / руководство по ремонту) | Карточки автоматически: draft Asset + plan + checklist + preventive WO (подтверждает admin). **GTM-эксперимент:** [docs/ai-technologist-bootstrap-experiment.md](docs/ai-technologist-bootstrap-experiment.md) | `createDraftAsset`, `createDraftPlan`, `createDraftChecklist`, `createDraftWorkOrder(preventive)` | MVP / experiment |
 | **Приёмщик** | Текст/фото дефекта | draft corrective WO | `createDraftWorkOrder`, `findAsset`, `findDuplicates`, `checkFeatureFlag` | 1.1 |
 | **Наставник** (Copilot) | Вопрос у станка | Ответ с цитатой; read-only | `searchDocs`, `getAssetHistory` | 1.1 |
 | **Писарь** (Репортер) | Текстовый отчёт инженера | draft closeout + JournalEntry | `draftCloseout`, `draftJournalEntry` | 1.1 |
